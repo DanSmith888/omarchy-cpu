@@ -16,6 +16,9 @@ file holds only what is specific to this repo.
 
 - `manifest.json` — the contract; bump `version` on release.
 - `BarWidget.qml` — entry point. Owns the pill and the single IpcHandler; forwards open/close/opened to Panel.qml, which owns all state.
+- `Model.js` — pure formatting/colour helpers; testable with plain node.
+- `Sparkline.qml` — Canvas line graph used for the load history.
+- `Panel.qml` — all state and the whole popup.
 - `bin/cpustatus` — one JSON line for the QML; `{}` = nothing to show.
 - `bin/cpuctl` — CLI: `get [--json]`, `doctor`, action verbs. Holds
   `PLUGIN_ID` / `REPO_URL` (keep in sync with the manifest).
@@ -43,4 +46,16 @@ bin/cpuctl doctor
 
 ## Gotchas
 
-- TODO: plugin-specific things the next session must know.
+- `cpustatus` imports `cpuctl` in-process (SourceFileLoader) so a poll is
+  one Python start-up, not two. Keep `cpuctl.get()` import-safe.
+- Load is a delta: the previous sample lives in
+  `$XDG_RUNTIME_DIR/dansmith888.cpu.state.json`, guarded by the sibling
+  `.lock`. A sample older than 60 s is discarded and a fresh 0.25 s pair
+  is taken instead, so the first poll still returns a rate.
+- Process CPU% is a share of one core (top(1) convention), so it can
+  exceed 100.
+- qmllint reports "unqualified access" for `root.`/`column.` references
+  inside inline `component`s and `Component {}` blocks. Those are expected;
+  only `Error:` lines matter.
+- Temperature labels vary by driver: AMD gives Tctl/Tccd1/Tccd2, Intel
+  gives "Package id 0". `Model.pickTemp` prefers the package sensor.

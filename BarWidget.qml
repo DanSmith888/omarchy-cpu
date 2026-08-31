@@ -4,7 +4,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
-// Cpu: the pill in the bar, and the host for the panel.
+// CPU: the pill in the bar, and the host for the panel.
 //
 // This is the manifest entry point. It owns nothing but the pill and the IPC
 // target; all state lives in Panel.qml, loaded here and read through
@@ -19,7 +19,21 @@ BarWidget {
 
   // Mirrors of the panel's state, so the pill has nothing to compute.
   readonly property bool devicePresent: panel ? panel.devicePresent === true : false
-  readonly property string label: panel ? panel.label : ""
+  readonly property bool showIcon: panel ? panel.showIcon === true : true
+  readonly property string readings: panel ? panel.barText : ""
+  readonly property string tierColor: panel ? panel.tierColor : ""
+  readonly property string pillText: {
+    if (!root.devicePresent) return ""
+    if (!root.showIcon) return root.readings
+    return root.readings === "" ? "󰘚" : "󰘚 " + root.readings
+  }
+  readonly property string tooltip: {
+    if (!panel) return "CPU"
+    var bits = [panel.shortModel, "Load " + panel.usageText]
+    if (panel.headlineTemp !== null) bits.push(panel.tempText)
+    if (panel.freqMhz !== null) bits.push(panel.clockText)
+    return bits.join("  ·  ")
+  }
 
   // ---- Panel lifecycle contract (shell.summon/hide/toggle routing).
   readonly property bool opened: panel ? panel.opened === true : false
@@ -78,11 +92,13 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: root.label !== "" ? "󰋼  " + root.label : "󰋼"   // TODO: glyph + text
+    text: root.pillText
     hasVisualContent: text !== ""
-    horizontalMargin: 8.75
-    verticalPadding: 8.75
-    tooltipText: root.label !== "" ? "Cpu — " + root.label : "Cpu"
+    tooltipText: root.tooltip
+    // The load bands recolour the whole pill; "" leaves the bar's own colour.
+    foreground: root.tierColor !== ""
+      ? root.tierColor
+      : (root.bar ? root.bar.barForeground : Color.foreground)
 
     onPressed: function(b) {
       if (b === Qt.MiddleButton) root.refresh()

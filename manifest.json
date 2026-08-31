@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "dansmith888.cpu",
-  "name": "Cpu",
+  "name": "CPU",
   "version": "0.1.0",
   "author": "Daniel Smith",
   "license": "MIT",
-  "description": "CPU load, temperature and clock in the Omarchy bar",
+  "description": "CPU load, per-core activity, temperature and clock in the Omarchy bar",
   "kinds": [
     "bar-widget"
   ],
@@ -13,10 +13,115 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Cpu",
-    "description": "CPU load, temperature and clock in the Omarchy bar",
+    "displayName": "CPU",
+    "description": "Load, temperature and clock in the bar; per-core bars, a load graph, sensors and the busiest processes in the panel.",
     "category": "Hardware",
+    "aliases": [
+      "cpu",
+      "processor",
+      "load"
+    ],
     "allowMultiple": false,
-    "defaultSection": "right"
+    "defaultSection": "right",
+    "defaults": {
+      "pollIntervalMs": 2000,
+      "showIcon": true,
+      "showUsage": true,
+      "showTemp": true,
+      "showClock": false,
+      "tempSensor": "auto",
+      "temperatureUnit": "C",
+      "historySamples": 60,
+      "busyFrom": 50,
+      "hotFrom": 85,
+      "busyColor": "",
+      "hotColor": "",
+      "topCount": 5
+    },
+    "schema": [
+      {
+        "key": "pollIntervalMs",
+        "type": "integer",
+        "label": "Refresh interval (ms)",
+        "min": 500,
+        "max": 60000,
+        "step": 500,
+        "defaultValue": 2000
+      },
+      {
+        "key": "showIcon",
+        "type": "boolean",
+        "label": "Show the chip icon",
+        "defaultValue": true
+      },
+      {
+        "key": "showUsage",
+        "type": "boolean",
+        "label": "Show load in the bar",
+        "defaultValue": true
+      },
+      {
+        "key": "showTemp",
+        "type": "boolean",
+        "label": "Show temperature in the bar",
+        "defaultValue": true
+      },
+      {
+        "key": "showClock",
+        "type": "boolean",
+        "label": "Show clock in the bar",
+        "defaultValue": false
+      },
+      {
+        "key": "tempSensor",
+        "type": "string",
+        "label": "Temperature sensor",
+        "defaultValue": "auto",
+        "description": "A hwmon label such as Tctl, or auto to pick the package sensor."
+      },
+      {
+        "key": "temperatureUnit",
+        "type": "enum",
+        "label": "Temperature unit",
+        "options": ["C", "F"],
+        "defaultValue": "C"
+      },
+      {
+        "key": "historySamples",
+        "type": "integer",
+        "label": "Graph history (samples)",
+        "min": 20,
+        "max": 240,
+        "step": 10,
+        "defaultValue": 60
+      },
+      {
+        "key": "busyFrom",
+        "type": "integer",
+        "label": "Busy from (%)",
+        "min": 1,
+        "max": 100,
+        "step": 5,
+        "defaultValue": 50
+      },
+      {
+        "key": "hotFrom",
+        "type": "integer",
+        "label": "Hot from (%)",
+        "min": 1,
+        "max": 100,
+        "step": 5,
+        "defaultValue": 85
+      },
+      {
+        "key": "topCount",
+        "type": "integer",
+        "label": "Processes listed",
+        "min": 1,
+        "max": 10,
+        "step": 1,
+        "defaultValue": 5
+      }
+    ]
   }
 }

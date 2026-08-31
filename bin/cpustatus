@@ -1,58 +1,46 @@
 #!/usr/bin/env python3
-"""cpustatus — one JSON line describing what Cpu shows.
+"""cpustatus — one JSON line describing what the CPU widget shows.
 
-    {"present": true, "label": "...", "value": 42}
+    {"present": true, "model": "...", "usage": 12.3, "perCore": [...],
+     "freqMhz": 4300, "maxFreqMhz": 4674, "tempC": 48.9, "temps": [...],
+     "load": [0.5, 0.6, 0.6], "memUsedPct": 18.4, "top": [...]}
 
 Exits 0 with an empty object when there is nothing to show — the widget
-hides itself rather than showing a stale value. A key set to null means
-"unsupported / no answer" and hides that one control.
+hides itself. A key set to null means "unsupported here" and hides that one
+control. Standard library only. No root, no network.
 
-Standard library only. No root, no network.
+The sampling lives in cpuctl; this just loads it in-process so a poll is
+one Python start-up, not two.
 """
 
+import importlib.machinery
+import importlib.util
 import json
 import os
-import subprocess
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TIMEOUT = 10
 
 
-def run(cmd, timeout=TIMEOUT):
-    """stdout on success, None on any failure. Never raises, never hangs."""
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return r.stdout if r.returncode == 0 else None
-    except Exception:
-        return None
-
-
-def discover():
-    """Return something truthy when the thing this plugin shows is present.
-
-    TODO: replace. Keep it cheap — this runs every poll.
-    """
-    return True
+def load_ctl():
+    path = os.path.join(HERE, "cpuctl")
+    loader = importlib.machinery.SourceFileLoader("cpuctl", path)
+    spec = importlib.util.spec_from_loader("cpuctl", loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
 
 
 def main():
-    if not discover():
+    try:
+        ctl = load_ctl()
+        state = ctl.get()
+    except BaseException:  # never let a probe take the shell's Process down
+        state = None
+    if not state:
         print("{}")
         return
-
-    state = {"present": True, "label": "", "value": None}
-
-    out = run([os.path.join(HERE, "cpuctl"), "get", "--json"])
-    if out:
-        try:
-            d = json.loads(out)
-            state["label"] = d.get("label", "")
-            state["value"] = d.get("value")
-            # TODO: copy further fields; leave None for unsupported ones.
-        except json.JSONDecodeError:
-            pass
-
-    print(json.dumps(state))
+    sys.stdout.write(json.dumps(state) + "\n")
 
 
 if __name__ == "__main__":

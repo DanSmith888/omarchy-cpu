@@ -1,48 +1,71 @@
 #!/usr/bin/env python3
-"""cpuctl — command-line backend for the Cpu Omarchy plugin.
+"""cpuctl — command-line backend for the CPU Omarchy plugin.
 
 Standard library only: no daemon, no background process. Each invocation
-does its work and exits.
+reads /proc and /sys, diffs against the previous sample kept in
+$XDG_RUNTIME_DIR, prints, and exits.
 
 Usage:
-  cpuctl get [--json]     current state
-  cpuctl doctor           check every link from the source to the bar
-  cpuctl set <value>      TODO: real verbs
+  cpuctl get [--json]          usage, per-core, temperatures, clock, load, memory, top
+  cpuctl top [--json] [-n N]   busiest processes since the previous sample
+  cpuctl doctor                check every link from /proc to the bar
 """
 
 import argparse
 import fcntl
+import glob
 import json
 import os
-import subprocess
+import re
 import sys
 import time
 
 PLUGIN_ID = "dansmith888.cpu"
 REPO_URL = "https://github.com/DanSmith888/omarchy-cpu.git"
-REQUIRED_FILES = ("manifest.json", "BarWidget.qml", "Panel.qml", "bin/cpustatus", "bin/cpuctl", )
+REQUIRED_FILES = ("manifest.json", "BarWidget.qml", "Panel.qml", "Model.js",
+                  "bin/cpustatus", "bin/cpuctl")
 
 # Never /tmp: a predictable shared path could be pre-created by another user.
 _RUNTIME_DIR = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-LOCK_PATH = os.path.join(_RUNTIME_DIR, "cpuctl.lock")
-LOCK_TIMEOUT = 30.0
-TIMEOUT = 10
+LOCK_PATH = os.path.join(_RUNTIME_DIR, PLUGIN_ID + ".lock")
+STATE_PATH = os.path.join(_RUNTIME_DIR, PLUGIN_ID + ".state.json")
+LOCK_TIMEOUT = 5.0
+# A previous sample older than this is thrown away (suspend, long gap).
+MAX_SAMPLE_AGE = 60.0
+# With no usable previous sample, wait this long and sample again so the
+# very first poll still has a rate instead of null.
+FIRST_SAMPLE_GAP = 0.25
+TOP_DEFAULT = 5
+
+# hwmon drivers that report the CPU, best first.
+CPU_HWMON = ("k10temp", "zenpower", "coretemp", "cpu_thermal", "soc_thermal", "acpitz")
+# Preferred temperature labels, best first (Tctl is what AMD throttles on).
+TEMP_PREFERENCE = ("Tctl", "Tdie", "Package id 0", "Composite", "CPU", "temp1")
 
 
-def _run(cmd, timeout=TIMEOUT):
-    """(rc, stdout, stderr); rc -1 on timeout/missing binary. Never raises."""
+def read(path):
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        return r.returncode, r.stdout, r.stderr
-    except Exception as exc:
-        return -1, "", str(exc)
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return None
 
 
-class Source:
-    """Exclusive access to whatever this plugin talks to.
+def read_int(path):
+    raw = read(path)
+    if raw is None:
+        return None
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return None
 
-    Every open goes through here so status, ctl and any research tools
-    serialise on one lock.
+
+class Sampler:
+    """Exclusive access to the sample state file.
+
+    Everything that reads /proc/stat deltas goes through here so two callers
+    (the bar poll and a terminal `cpuctl get`) don't fight over the baseline.
     """
 
     def __enter__(self):
@@ -57,43 +80,334 @@ class Source:
                     self._lock.close()
                     raise SystemExit(
                         f"cpuctl: busy (waited {LOCK_TIMEOUT:.0f}s for {LOCK_PATH})")
-                time.sleep(0.25)
-        # TODO: open the real resource here.
+                time.sleep(0.05)
         return self
 
     def __exit__(self, *_):
-        # TODO: close the real resource here.
         try:
             fcntl.flock(self._lock, fcntl.LOCK_UN)
         finally:
             self._lock.close()
 
-    def get(self):
-        """Current state as a dict. None values mean unsupported/no answer."""
-        return {"label": "TODO", "value": None}   # TODO
+    # ---- raw readers -------------------------------------------------
 
-    def set(self, value):
-        raise SystemExit("cpuctl: set not implemented")   # TODO
+    @staticmethod
+    def read_stat():
+        """{'total': (busy, all), 'cores': [(busy, all), ...]} in jiffies."""
+        raw = read("/proc/stat")
+        if raw is None:
+            return None
+        total = None
+        cores = []
+        for line in raw.splitlines():
+            if not line.startswith("cpu"):
+                continue
+            parts = line.split()
+            vals = [int(x) for x in parts[1:9]]
+            while len(vals) < 8:
+                vals.append(0)
+            idle = vals[3] + vals[4]
+            alls = sum(vals)
+            entry = (alls - idle, alls)
+            if parts[0] == "cpu":
+                total = entry
+            else:
+                cores.append(entry)
+        if total is None:
+            return None
+        return {"total": total, "cores": cores}
 
+    @staticmethod
+    def read_procs():
+        """{pid: [jiffies, name]} for every process we can read."""
+        out = {}
+        for path in glob.glob("/proc/[0-9]*/stat"):
+            raw = read(path)
+            if not raw:
+                continue
+            try:
+                open_paren = raw.index("(")
+                close_paren = raw.rindex(")")
+                comm = raw[open_paren + 1:close_paren]
+                rest = raw[close_paren + 2:].split()
+                jiffies = int(rest[11]) + int(rest[12])
+                pid = int(raw[:open_paren].strip())
+            except (ValueError, IndexError):
+                continue
+            out[pid] = [jiffies, comm]
+        return out
+
+    @staticmethod
+    def nice_name(pid, comm):
+        """Basename of argv[0] when it is longer than the 15-char comm."""
+        raw = read(f"/proc/{pid}/cmdline")
+        if raw:
+            first = raw.split("\0", 1)[0]
+            base = os.path.basename(first)
+            if base and (base.startswith(comm) or len(comm) >= 15):
+                return base
+        return comm
+
+    # ---- state -------------------------------------------------------
+
+    @staticmethod
+    def load_state():
+        raw = read(STATE_PATH)
+        if not raw:
+            return None
+        try:
+            d = json.loads(raw)
+        except ValueError:
+            return None
+        if not isinstance(d, dict) or "ts" not in d:
+            return None
+        if time.time() - float(d["ts"]) > MAX_SAMPLE_AGE:
+            return None
+        return d
+
+    @staticmethod
+    def save_state(state):
+        tmp = STATE_PATH + ".tmp"
+        try:
+            with open(tmp, "w") as f:
+                json.dump(state, f, separators=(",", ":"))
+            os.replace(tmp, STATE_PATH)
+        except OSError:
+            pass
+
+    # ---- the sample --------------------------------------------------
+
+    def sample(self, top_n=TOP_DEFAULT):
+        prev = self.load_state()
+        stat = self.read_stat()
+        if stat is None:
+            return None
+        procs = self.read_procs()
+        now = time.time()
+
+        if prev is None or prev.get("total", [0, 0])[1] > stat["total"][1]:
+            # No baseline (first run, or counters went backwards after a
+            # reboot): take a short second sample so we still return rates.
+            prev = {"ts": now, "total": stat["total"], "cores": stat["cores"],
+                    "procs": {str(p): v[0] for p, v in procs.items()}}
+            time.sleep(FIRST_SAMPLE_GAP)
+            stat = self.read_stat() or stat
+            procs = self.read_procs() or procs
+            now = time.time()
+
+        def pct(cur, old):
+            d_all = cur[1] - old[1]
+            if d_all <= 0:
+                return 0.0
+            return max(0.0, min(100.0, 100.0 * (cur[0] - old[0]) / d_all))
+
+        usage = pct(stat["total"], prev["total"])
+        prev_cores = prev.get("cores") or []
+        per_core = [pct(c, prev_cores[i]) if i < len(prev_cores) else 0.0
+                    for i, c in enumerate(stat["cores"])]
+
+        # Per-process share, expressed like top(1): percent of one core.
+        ncpu = max(1, len(stat["cores"]))
+        d_all = stat["total"][1] - prev["total"][1]
+        prev_procs = prev.get("procs") or {}
+        top = []
+        if d_all > 0:
+            for pid, (jiffies, comm) in procs.items():
+                old = prev_procs.get(str(pid))
+                if old is None:
+                    continue
+                d = jiffies - old
+                if d <= 0:
+                    continue
+                share = 100.0 * d / d_all * ncpu
+                top.append((share, pid, comm))
+        top.sort(reverse=True)
+        top_list = [{"pid": pid, "name": self.nice_name(pid, comm), "cpu": round(share, 1)}
+                    for share, pid, comm in top[:top_n]]
+
+        self.save_state({"ts": now, "total": stat["total"], "cores": stat["cores"],
+                         "procs": {str(p): v[0] for p, v in procs.items()}})
+
+        return {
+            "usage": round(usage, 1),
+            "perCore": [round(v) for v in per_core],
+            "top": top_list,
+            "sampleSec": round(now - float(prev["ts"]), 2),
+        }
+
+
+# ---- static / instantaneous readings ------------------------------------
+
+def cpu_model():
+    raw = read("/proc/cpuinfo") or ""
+    model = ""
+    cores = None
+    for line in raw.splitlines():
+        if not model and line.startswith("model name"):
+            model = line.split(":", 1)[1].strip()
+        elif cores is None and line.startswith("cpu cores"):
+            try:
+                cores = int(line.split(":", 1)[1])
+            except ValueError:
+                cores = None
+        if model and cores is not None:
+            break
+    threads = os.cpu_count() or len(re.findall(r"^processor", raw, re.M)) or None
+    return {"model": model or "CPU", "cores": cores or threads, "threads": threads}
+
+
+def cpu_freq():
+    """Average current MHz across policies, and the top MHz. None if no cpufreq."""
+    cur = []
+    top = None
+    for base in glob.glob("/sys/devices/system/cpu/cpu[0-9]*/cpufreq"):
+        khz = read_int(os.path.join(base, "scaling_cur_freq"))
+        if khz:
+            cur.append(khz / 1000.0)
+        mx = read_int(os.path.join(base, "cpuinfo_max_freq"))
+        if mx:
+            top = max(top or 0, mx / 1000.0)
+    if cur:
+        return {"freqMhz": round(sum(cur) / len(cur)), "maxFreqMhz": round(top) if top else None}
+    # Fallback: /proc/cpuinfo "cpu MHz" lines.
+    raw = read("/proc/cpuinfo") or ""
+    vals = [float(m) for m in re.findall(r"^cpu MHz\s*:\s*([0-9.]+)", raw, re.M)]
+    if vals:
+        return {"freqMhz": round(sum(vals) / len(vals)), "maxFreqMhz": None}
+    return {"freqMhz": None, "maxFreqMhz": None}
+
+
+def cpu_temps():
+    """{'sensor': driver, 'temps': [{'label','c'}]} from the best CPU hwmon."""
+    found = []
+    for hw in sorted(glob.glob("/sys/class/hwmon/hwmon*")):
+        name = (read(os.path.join(hw, "name")) or "").strip()
+        if name not in CPU_HWMON:
+            continue
+        temps = []
+        for inp in sorted(glob.glob(os.path.join(hw, "temp*_input"))):
+            milli = read_int(inp)
+            if milli is None:
+                continue
+            label = (read(inp.replace("_input", "_label")) or "").strip()
+            if not label:
+                label = os.path.basename(inp).replace("_input", "")
+            temps.append({"label": label, "c": round(milli / 1000.0, 1)})
+        if temps:
+            found.append((CPU_HWMON.index(name), name, temps))
+    if found:
+        found.sort()
+        _, name, temps = found[0]
+        return {"sensor": name, "temps": temps}
+    # Fallback: thermal zones that look like a CPU.
+    for zone in sorted(glob.glob("/sys/class/thermal/thermal_zone*")):
+        ztype = (read(os.path.join(zone, "type")) or "").strip()
+        if not re.search(r"cpu|pkg|x86|soc", ztype, re.I):
+            continue
+        milli = read_int(os.path.join(zone, "temp"))
+        if milli is not None:
+            return {"sensor": ztype, "temps": [{"label": ztype, "c": round(milli / 1000.0, 1)}]}
+    return {"sensor": None, "temps": []}
+
+
+def pick_temp(temps, preferred="auto"):
+    """The headline temperature: the preferred label if present, else the
+    first label in TEMP_PREFERENCE, else the hottest reading."""
+    if not temps:
+        return None
+    if preferred and preferred != "auto":
+        for t in temps:
+            if t["label"] == preferred:
+                return t["c"]
+    for label in TEMP_PREFERENCE:
+        for t in temps:
+            if t["label"] == label:
+                return t["c"]
+    return max(t["c"] for t in temps)
+
+
+def load_avg():
+    raw = read("/proc/loadavg")
+    if not raw:
+        return None
+    try:
+        return [float(x) for x in raw.split()[:3]]
+    except ValueError:
+        return None
+
+
+def memory():
+    raw = read("/proc/meminfo") or ""
+    vals = {}
+    for line in raw.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] in ("MemTotal:", "MemAvailable:"):
+            try:
+                vals[parts[0][:-1]] = int(parts[1])
+            except ValueError:
+                pass
+    total = vals.get("MemTotal")
+    avail = vals.get("MemAvailable")
+    if not total or avail is None:
+        return {"memUsedPct": None, "memUsedGiB": None, "memTotalGiB": None}
+    used = total - avail
+    return {"memUsedPct": round(100.0 * used / total, 1),
+            "memUsedGiB": round(used / 1048576.0, 1),
+            "memTotalGiB": round(total / 1048576.0, 1)}
+
+
+def get(top_n=TOP_DEFAULT):
+    """Everything the panel shows, as one dict. None = unsupported here."""
+    with Sampler() as s:
+        sample = s.sample(top_n)
+    if sample is None:
+        return None
+    state = {"present": True}
+    state.update(cpu_model())
+    state.update(sample)
+    state.update(cpu_freq())
+    temps = cpu_temps()
+    state["sensor"] = temps["sensor"]
+    state["temps"] = temps["temps"]
+    state["tempC"] = pick_temp(temps["temps"])
+    state["load"] = load_avg()
+    state.update(memory())
+    return state
+
+
+# ---- doctor -------------------------------------------------------------
 
 def doctor():
-    """Check every link from the source to the bar widget.
-
-    An absent widget can have many causes that look identical from outside;
-    this says which link is broken and how to fix it.
-    """
     checks = []
 
     def add(ok, label, detail="", fix=""):
         checks.append((ok, label, detail, fix))
 
-    # 1. source — TODO: adapter/device/daemon checks go here, cheapest first.
+    # 1. sources, cheapest first
+    add(read("/proc/stat") is not None, "/proc/stat readable", "",
+        "this is a Linux-only plugin; /proc must be mounted")
+    freq = cpu_freq()
+    add(True, "CPU clock",
+        f"{freq['freqMhz']} MHz" if freq["freqMhz"] else "no cpufreq; clock hidden in the panel")
+    temps = cpu_temps()
+    add(True, "CPU temperature",
+        f"{temps['sensor']}: " + ", ".join(f"{t['label']} {t['c']}°C" for t in temps["temps"])
+        if temps["temps"] else "no CPU hwmon found; temperature hidden in the panel")
     try:
-        with Source() as src:
-            state = src.get()
-        add(state is not None, "Source answers", "", "TODO: fix hint")
+        os.makedirs(_RUNTIME_DIR, exist_ok=True)
+        with open(os.path.join(_RUNTIME_DIR, PLUGIN_ID + ".probe"), "w") as f:
+            f.write("ok")
+        os.remove(os.path.join(_RUNTIME_DIR, PLUGIN_ID + ".probe"))
+        add(True, "Runtime dir writable", _RUNTIME_DIR)
+    except OSError as exc:
+        add(False, "Runtime dir writable", str(exc), "export XDG_RUNTIME_DIR to a writable directory")
+    try:
+        state = get()
+        add(state is not None, "Sample succeeds",
+            f"usage {state['usage']}% over {state['sampleSec']}s" if state else "",
+            "run with python3 -X dev to see the traceback")
     except SystemExit as exc:
-        add(False, "Source answers", str(exc), "TODO: fix hint")
+        add(False, "Sample succeeds", str(exc), f"rm {LOCK_PATH}")
 
     # 2. plugin
     plug = os.path.expanduser("~/.config/omarchy/plugins/" + PLUGIN_ID)
@@ -109,7 +423,7 @@ def doctor():
         with open(os.path.expanduser("~/.config/omarchy/shell.json")) as f:
             layout = json.load(f).get("bar", {}).get("layout", {})
         placed = any(PLUGIN_ID == w.get("id")
-                     for sec in layout.values() for w in sec)
+                     for sec in layout.values() for w in sec if isinstance(w, dict))
     except (OSError, ValueError, AttributeError):
         placed = False
     add(placed, "Widget placed in the bar", "",
@@ -135,10 +449,26 @@ def doctor():
     return 1 if failed else 0
 
 
+# ---- CLI ---------------------------------------------------------------
+
+def print_human(state):
+    print(f"  {state['model']}  ({state['cores']} cores / {state['threads']} threads)")
+    print(f"  usage   {state['usage']}%  over {state['sampleSec']}s")
+    print("  cores   " + " ".join(f"{v:3d}" for v in state["perCore"]))
+    if state["freqMhz"]:
+        top = f" of {state['maxFreqMhz']}" if state["maxFreqMhz"] else ""
+        print(f"  clock   {state['freqMhz']} MHz{top}")
+    if state["temps"]:
+        print("  temp    " + "  ".join(f"{t['label']} {t['c']}°C" for t in state["temps"]))
+    if state["load"]:
+        print("  load    " + "  ".join(f"{v:.2f}" for v in state["load"]))
+    if state["memUsedPct"] is not None:
+        print(f"  memory  {state['memUsedGiB']} / {state['memTotalGiB']} GiB ({state['memUsedPct']}%)")
+    if state["top"]:
+        print("  top     " + "  ".join(f"{p['name']} {p['cpu']}%" for p in state["top"]))
+
+
 def main():
-    # SUPPRESS matters: without it the subparser re-declares these flags with
-    # their own defaults and clobbers the top-level values, so `--json` only
-    # works on one side of the subcommand.
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
                         help="machine-readable output")
@@ -148,8 +478,8 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("get", parents=[common])
     sub.add_parser("doctor", parents=[common])
-    p = sub.add_parser("set", parents=[common])
-    p.add_argument("value")
+    p = sub.add_parser("top", parents=[common])
+    p.add_argument("-n", type=int, default=TOP_DEFAULT)
 
     args = ap.parse_args()
     as_json = getattr(args, "json", False)
@@ -157,19 +487,26 @@ def main():
     if args.cmd == "doctor":
         return doctor()
 
-    with Source() as src:
-        if args.cmd == "get":
-            state = src.get()
-            if as_json:
-                print(json.dumps(state))
-            else:
-                width = max(len(k) for k in state)
-                for k, v in state.items():
-                    print(f"  {k.ljust(width)}  {'-' if v is None else v}")
-            return 0
-        if args.cmd == "set":
-            src.set(args.value)
-            return 0
+    if args.cmd == "get":
+        state = get()
+        if state is None:
+            raise SystemExit("cpuctl: /proc/stat unreadable")
+        if as_json:
+            print(json.dumps(state))
+        else:
+            print_human(state)
+        return 0
+
+    if args.cmd == "top":
+        state = get(top_n=max(1, args.n))
+        if state is None:
+            raise SystemExit("cpuctl: /proc/stat unreadable")
+        if as_json:
+            print(json.dumps(state["top"]))
+        else:
+            for p in state["top"]:
+                print(f"  {p['cpu']:6.1f}%  {p['pid']:>7}  {p['name']}")
+        return 0
     return 0
 
 

@@ -1,15 +1,20 @@
-# Cpu
+# CPU
 
-CPU load, temperature and clock in the Omarchy bar — in the [Omarchy](https://omarchy.org/) bar.
+Load, temperature and clock in the [Omarchy](https://omarchy.org/) bar, and
+a fuller picture one click away.
 
-TODO: one paragraph on what this targets and what it does not.
+The pill shows what you pick — load, temperature, clock — and recolours
+itself as the machine gets busy. The panel adds a load graph, a bar per
+hardware thread, every CPU temperature sensor the kernel exposes, and the
+processes actually burning the cycles.
+
+Everything is read from `/proc` and `/sys`. No daemon, no root, no polling
+anything off this machine.
 
 <!-- ![Bar](docs/bar.png) -->
 <!-- ![Panel](docs/panel.png) -->
 
 ## Install
-
-No setup, no root.
 
 ```bash
 omarchy plugin add https://github.com/DanSmith888/omarchy-cpu.git --enable
@@ -21,9 +26,8 @@ omarchy plugin add https://github.com/DanSmith888/omarchy-cpu.git --enable
 ~/.config/omarchy/plugins/dansmith888.cpu/bin/cpuctl doctor
 ```
 
-Verifies every link from the source to the bar and tells you how to fix
-whatever is broken. Put `bin/` on your `PATH` if you want `cpuctl` as
-a command.
+Verifies every link from `/proc` to the bar and tells you how to fix
+whatever is broken.
 
 ## Update
 
@@ -38,44 +42,66 @@ omarchy plugin remove dansmith888.cpu
 ```
 
 That removes everything. The plugin never touches anything outside its own
-folder and a lock file in `$XDG_RUNTIME_DIR`.
+folder and two files in `$XDG_RUNTIME_DIR`.
 
 ## Using it
 
-**Left-click** the pill to open the panel. **Middle-click** to force a
-refresh. To open the panel from a hotkey, bind:
+**Left-click** the pill to open the panel. **Middle-click** forces a
+refresh. Esc closes. To open it from a hotkey:
 
 ```bash
 omarchy-shell shell toggle dansmith888.cpu
 ```
 
-## What it does
+## What it shows
 
-TODO
+| Section | What's in it |
+|---|---|
+| **Hero** | Model, core and thread count, top clock, current load |
+| **Graph** | Recent load, 30–240 samples |
+| **Load / Memory** | Total CPU load and used RAM, with the 1/5/15 load average underneath |
+| **Cores** | One bar per hardware thread; hover for the number |
+| **Temperature** | Every label the CPU's hwmon reports (Tctl, Tccd1, …), headline one in bold |
+| **Top processes** | Busiest processes since the last sample, as a share of one core (like `top`) |
+| **In the bar** | Which readings the pill shows, refresh rate, °C/°F, graph history |
+| **Load colors** | Two thresholds and a color each, taken from your live Omarchy theme |
+
+Settings are stored inline on the widget's `~/.config/omarchy/shell.json`
+entry and apply immediately.
 
 ## Requirements
 
 - Omarchy (Quattro or later)
-- TODO
+- Linux with `/proc` mounted — that's it
+
+Temperatures come from `k10temp`, `zenpower`, `coretemp`, `cpu_thermal` or
+`acpitz`, whichever is present, with thermal zones as a fallback. Machines
+with no CPU hwmon simply hide that section. The clock is the average of the
+per-policy `scaling_cur_freq` values, falling back to `/proc/cpuinfo`.
 
 ## Command line
 
 ```
-cpuctl get [--json]
-cpuctl doctor
+cpuctl get [--json]        load, per-core, temperatures, clock, memory, top
+cpuctl top [--json] [-n N] busiest processes since the previous sample
+cpuctl doctor              check every link from /proc to the bar
 ```
 
 ## Good to know
 
-TODO: quirks and limits.
+- Load is a delta between two samples. The first reading after a boot or a
+  long gap takes a 0.25 s second sample so it still means something.
+- Process percentages are shares of **one** core, so a busy 4-thread job
+  can read 400%, the same way `top` reports it.
+- Used memory follows `MemAvailable`, so reclaimable cache is not counted.
 
 ## What runs, and as whom
 
 Omarchy plugins run inside the shell process, unsandboxed, as your user.
 This one runs two Python scripts from its own `bin/` — standard library
 only, no extra packages, no binaries, no network, nothing that needs root.
-It writes nothing outside its folder except a lock file in
-`$XDG_RUNTIME_DIR`.
+It writes nothing outside its folder except a lock and a sample-state file
+in `$XDG_RUNTIME_DIR`.
 
 ## Licence
 
