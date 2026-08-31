@@ -21,6 +21,10 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+# Importing the CLI in-process would otherwise litter the plugin folder with
+# __pycache__; the plugin dir stays exactly as installed.
+sys.dont_write_bytecode = True
+
 
 def load_ctl():
     path = os.path.join(HERE, "cpuctl")
