@@ -202,8 +202,7 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(380))
-    contentHeight: panel.fittedContentHeight(
-      column.implicitHeight + Style.spacing.panelPadding * 2, Style.space(900))
+    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(760))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -213,8 +212,9 @@ Panel {
 
       Flickable {
         id: flick
+        // No margins here: KeyboardPanel.padding already insets the content,
+        // the way the first-party tailscale and agents panels do it.
         anchors.fill: parent
-        anchors.margins: Style.spacing.panelPadding
         contentWidth: width
         contentHeight: column.implicitHeight
         clip: true
