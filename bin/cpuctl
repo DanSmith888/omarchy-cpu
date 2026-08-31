@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""cpuctl — command-line backend for the Cpu Omarchy plugin.
+
+Standard library only: no daemon, no background process. Each invocation
+does its work and exits.
+
+Usage:
+  cpuctl get [--json]     current state
+  cpuctl doctor           check every link from the source to the bar
+  cpuctl set <value>      TODO: real verbs
+"""
+
+import argparse
+import fcntl
+import json
+import os
+import subprocess
+import sys
+import time
+
+PLUGIN_ID = "dansmith888.cpu"
+REPO_URL = "https://github.com/DanSmith888/omarchy-cpu.git"
+REQUIRED_FILES = ("manifest.json", "BarWidget.qml", "Panel.qml", "bin/cpustatus", "bin/cpuctl", )
+
+# Never /tmp: a predictable shared path could be pre-created by another user.
+_RUNTIME_DIR = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+LOCK_PATH = os.path.join(_RUNTIME_DIR, "cpuctl.lock")
+LOCK_TIMEOUT = 30.0
+TIMEOUT = 10
+
+
+def _run(cmd, timeout=TIMEOUT):
+    """(rc, stdout, stderr); rc -1 on timeout/missing binary. Never raises."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return r.returncode, r.stdout, r.stderr
+    except Exception as exc:
+        return -1, "", str(exc)
+
+
+class Source:
+    """Exclusive access to whatever this plugin talks to.
+
+    Every open goes through here so status, ctl and any research tools
+    serialise on one lock.
+    """
+
+    def __enter__(self):
+        self._lock = open(LOCK_PATH, "w")
+        deadline = time.monotonic() + LOCK_TIMEOUT
+        while True:
+            try:
+                fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    self._lock.close()
+                    raise SystemExit(
+                        f"cpuctl: busy (waited {LOCK_TIMEOUT:.0f}s for {LOCK_PATH})")
+                time.sleep(0.25)
+        # TODO: open the real resource here.
+        return self
+
+    def __exit__(self, *_):
+        # TODO: close the real resource here.
+        try:
+            fcntl.flock(self._lock, fcntl.LOCK_UN)
+        finally:
+            self._lock.close()
+
+    def get(self):
+        """Current state as a dict. None values mean unsupported/no answer."""
+        return {"label": "TODO", "value": None}   # TODO
+
+    def set(self, value):
+        raise SystemExit("cpuctl: set not implemented")   # TODO
+
+
+def doctor():
+    """Check every link from the source to the bar widget.
+
+    An absent widget can have many causes that look identical from outside;
+    this says which link is broken and how to fix it.
+    """
+    checks = []
+
+    def add(ok, label, detail="", fix=""):
+        checks.append((ok, label, detail, fix))
+
+    # 1. source — TODO: adapter/device/daemon checks go here, cheapest first.
+    try:
+        with Source() as src:
+            state = src.get()
+        add(state is not None, "Source answers", "", "TODO: fix hint")
+    except SystemExit as exc:
+        add(False, "Source answers", str(exc), "TODO: fix hint")
+
+    # 2. plugin
+    plug = os.path.expanduser("~/.config/omarchy/plugins/" + PLUGIN_ID)
+    add(os.path.isdir(plug), "Plugin installed", plug,
+        "omarchy plugin add " + REPO_URL + " --enable")
+    missing = [f for f in REQUIRED_FILES if not os.path.exists(os.path.join(plug, f))]
+    add(not missing, "Plugin files present",
+        "missing: " + ", ".join(missing) if missing else "",
+        "omarchy plugin update " + PLUGIN_ID)
+
+    # 3. bar layout
+    try:
+        with open(os.path.expanduser("~/.config/omarchy/shell.json")) as f:
+            layout = json.load(f).get("bar", {}).get("layout", {})
+        placed = any(PLUGIN_ID == w.get("id")
+                     for sec in layout.values() for w in sec)
+    except (OSError, ValueError, AttributeError):
+        placed = False
+    add(placed, "Widget placed in the bar", "",
+        "omarchy plugin enable " + PLUGIN_ID + " --section right")
+
+    width = max(len(c[1]) for c in checks)
+    failed = 0
+    for ok, label, detail, fix in checks:
+        mark = "ok  " if ok else "FAIL"
+        line = f"  [{mark}] {label.ljust(width)}"
+        if detail:
+            line += f"  {detail}"
+        print(line)
+        if not ok and fix:
+            print(f"         -> {fix}")
+        failed += 0 if ok else 1
+    print()
+    if failed:
+        print(f"  {failed} check(s) failed.")
+    else:
+        print("  All checks passed. If the widget is still missing, give it "
+              "5s to poll, then: omarchy restart shell")
+    return 1 if failed else 0
+
+
+def main():
+    # SUPPRESS matters: without it the subparser re-declares these flags with
+    # their own defaults and clobbers the top-level values, so `--json` only
+    # works on one side of the subcommand.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                        help="machine-readable output")
+
+    ap = argparse.ArgumentParser(prog="cpuctl", parents=[common],
+                                 description=__doc__.split("\n\n")[1])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("get", parents=[common])
+    sub.add_parser("doctor", parents=[common])
+    p = sub.add_parser("set", parents=[common])
+    p.add_argument("value")
+
+    args = ap.parse_args()
+    as_json = getattr(args, "json", False)
+
+    if args.cmd == "doctor":
+        return doctor()
+
+    with Source() as src:
+        if args.cmd == "get":
+            state = src.get()
+            if as_json:
+                print(json.dumps(state))
+            else:
+                width = max(len(k) for k in state)
+                for k, v in state.items():
+                    print(f"  {k.ljust(width)}  {'-' if v is None else v}")
+            return 0
+        if args.cmd == "set":
+            src.set(args.value)
+            return 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
