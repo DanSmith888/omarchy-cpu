@@ -95,6 +95,15 @@ cpuctl top [--json] [-n N] busiest processes
 cpuctl doctor              check every link from /proc to the bar
 ```
 
+## Tests
+
+```bash
+test/state-dir-safety.sh
+```
+
+Checks that the runtime state directory cannot be used to write through a
+symlink, against a throwaway `XDG_RUNTIME_DIR` so live state is untouched.
+
 ## What runs, and as whom
 
 Omarchy plugins run inside the shell process, unsandboxed, as your user. This
