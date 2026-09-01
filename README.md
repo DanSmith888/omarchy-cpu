@@ -8,7 +8,7 @@ CPU load, temperature and clock in the [Omarchy](https://omarchy.org/) bar.
 
 I built this for my own machine, alongside
 [omarchy-gpu](https://github.com/DanSmith888/omarchy-gpu) and
-[omarchy-network](https://github.com/DanSmith888/omarchy-network). The three
+[omarchy-bandwidth](https://github.com/DanSmith888/omarchy-bandwidth). The three
 share a panel layout and controls.
 
 ## Install

@@ -44,7 +44,7 @@ CVE-2020-8694; without access the plugin shows no power at all rather than
 estimating, and never asks for elevated privileges. The README documents the
 one udev rule that grants it, what that trades away, and how to undo it.
 
-One of a trio with omarchy-gpu and omarchy-network, which share the same
+One of a trio with omarchy-gpu and omarchy-bandwidth, which share the same
 panel layout and controls.
 
 ### Submission checklist
