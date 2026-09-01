@@ -325,7 +325,7 @@ Panel {
           Text {
             width: parent.width
             visible: root.powerPresent && root.packageW === null
-            text: "Package power needs read access to the RAPL counter — see the README."
+            text: "No package power: the kernel keeps the RAPL energy counter root-only. The README's \"CPU power\" section has the one-line fix."
             color: Qt.darker(root.barForeground, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -644,18 +644,18 @@ Panel {
           PanelSeparator {
             width: parent.width
             foreground: root.barForeground
-            visible: root.powerPresent
+            visible: root.packageW !== null
           }
 
           PanelSectionHeader {
             text: "POWER"
             foreground: root.barForeground
-            visible: root.powerPresent
+            visible: root.packageW !== null
           }
 
           Text {
             width: parent.width
-            visible: root.powerPresent
+            visible: root.packageW !== null
             text: "Most AMD machines report no package power limit, so the bar grows to fit the highest reading instead. Set your CPU's TDP here for a fixed scale. Currently " + root.powerScaleNote + "."
             color: Qt.darker(root.barForeground, 1.4)
             font.family: Style.font.family
@@ -665,7 +665,7 @@ Panel {
 
           Row {
             width: parent.width
-            visible: root.powerPresent
+            visible: root.packageW !== null
             spacing: Style.space(8)
 
             Text {
