@@ -81,9 +81,14 @@ Panel {
   // "total" = share of the whole CPU (all threads at 100% reads 100%).
   // "core"  = share of one core, the top(1) convention.
   readonly property string processScale: setting("processScale", "total") === "core" ? "core" : "total"
+  // Labels say what the scale tops out at, because "all cores" reads both
+  // ways: as a share OF all the cores (100%) or as a count ACROSS them
+  // (2400% on this machine). The number removes the ambiguity.
   readonly property var processScaleChips: [
-    { value: "total", label: "All cores", tooltip: "Every thread busy reads 100%" },
-    { value: "core", label: "One core", tooltip: "The top(1) convention: one busy thread reads 100%" }
+    { value: "total", label: "Whole CPU · 100%",
+      tooltip: "Every process's share of the entire chip. Everything running flat out adds up to 100%." },
+    { value: "core", label: "Per core · " + (root.threads > 0 ? root.threads * 100 : 100) + "%",
+      tooltip: "What top and htop show: one fully busy thread reads 100%, so this machine totals " + (root.threads > 0 ? root.threads * 100 : 100) + "%." }
   ]
   readonly property int topCount: Model.clampInt(setting("topCount", 5), 1, 10, 5)
   readonly property string temperatureUnit: Model.normalizeUnit(setting("temperatureUnit", "C"))
@@ -643,7 +648,7 @@ Panel {
 
           Text {
             width: parent.width
-            text: "How each process's share is measured. All cores counts the whole chip, so everything running flat out adds up to 100% — one thread pinned on a 24-thread machine is about 4%. One core is what top and htop show: that same thread reads 100%, and a busy four-thread job reads 400%."
+            text: "What a process's percentage is measured against.\n\nWhole CPU · 100% — a share of the entire chip. One pinned thread on this " + root.threads + "-thread machine reads about " + (root.threads > 0 ? (100 / root.threads).toFixed(1) : "100") + "%, and everything at full tilt adds up to 100%.\n\nPer core · " + (root.threads > 0 ? root.threads * 100 : 100) + "% — what top and htop show. That same pinned thread reads 100%, a busy four-thread job reads 400%, and the whole machine flat out totals " + (root.threads > 0 ? root.threads * 100 : 100) + "%."
             color: Qt.darker(root.barForeground, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
