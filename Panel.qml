@@ -665,6 +665,64 @@ Panel {
             onChanged: function(value) { root.setHistorySamples(value) }
           }
 
+          PanelSeparator {
+            width: parent.width
+            foreground: root.barForeground
+            visible: root.powerEnabled
+          }
+
+          PanelSectionHeader {
+            text: "POWER"
+            foreground: root.barForeground
+            visible: root.powerEnabled
+          }
+
+          Text {
+            width: parent.width
+            visible: root.powerEnabled
+            text: root.powerHasScale
+              ? "Measured from the CPU's energy counter, against the limit below."
+              : "Measured from the CPU's energy counter. AMD reports no power limit, so there is nothing to measure it against — enter your CPU's PPT below for a bar and a total, or leave it at 0 to just show the wattage."
+            color: Qt.darker(root.barForeground, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Row {
+            width: parent.width
+            visible: root.powerEnabled
+            spacing: Style.space(8)
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: "PPT"
+              color: Qt.darker(root.barForeground, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            NumberField {
+              label: ""
+              value: root.pptWatts
+              from: 0
+              to: 1000
+              stepSize: 1
+              foreground: root.barForeground
+              accent: Color.accent
+              field.editable: false
+              onModified: function(value) { root.setPptWatts(value) }
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: "W  (0 = no total)"
+              color: Qt.darker(root.barForeground, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+
           PanelSeparator { width: parent.width; foreground: root.barForeground }
 
           PanelSectionHeader { text: "LAYOUT"; foreground: root.barForeground }
