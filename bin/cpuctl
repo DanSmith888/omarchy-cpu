@@ -19,6 +19,8 @@ import os
 import re
 import sys
 import time
+import stat
+import tempfile
 
 PLUGIN_ID = "dansmith888.cpu"
 REPO_URL = "https://github.com/DanSmith888/omarchy-cpu.git"
@@ -27,8 +29,51 @@ REQUIRED_FILES = ("manifest.json", "BarWidget.qml", "Panel.qml", "Model.js",
 
 # Never /tmp: a predictable shared path could be pre-created by another user.
 _RUNTIME_DIR = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-LOCK_PATH = os.path.join(_RUNTIME_DIR, PLUGIN_ID + ".lock")
-STATE_PATH = os.path.join(_RUNTIME_DIR, PLUGIN_ID + ".state.json")
+# Our own 0700 directory inside the runtime dir, rather than predictable names
+# sitting directly in a shared one. Everything below opens with O_NOFOLLOW and
+# checks it got a regular file, so a symlink planted at one of these paths is
+# refused rather than followed and truncated.
+_STATE_DIR = os.path.join(_RUNTIME_DIR, PLUGIN_ID)
+LOCK_PATH = os.path.join(_STATE_DIR, "lock")
+STATE_PATH = os.path.join(_STATE_DIR, "state.json")
+# Ceiling on the state file read: it is ours, but read it as untrusted anyway.
+MAX_STATE_BYTES = 4 * 1024 * 1024
+
+
+def state_dir():
+    """Our private runtime directory, verified before use.
+
+    Creating it is not enough: check with lstat that what is there is a real
+    directory we own, not a symlink pointing somewhere else, and that nobody
+    else can write to it.
+    """
+    try:
+        os.makedirs(_STATE_DIR, mode=0o700, exist_ok=True)
+    except OSError as exc:
+        raise SystemExit(f"cpuctl: cannot create {_STATE_DIR}: {exc}")
+    try:
+        st = os.lstat(_STATE_DIR)
+    except OSError as exc:
+        raise SystemExit(f"cpuctl: cannot stat {_STATE_DIR}: {exc}")
+    if not stat.S_ISDIR(st.st_mode) or stat.S_ISLNK(st.st_mode):
+        raise SystemExit(f"cpuctl: {_STATE_DIR} is not a directory")
+    if st.st_uid != os.getuid():
+        raise SystemExit(f"cpuctl: {_STATE_DIR} is not owned by this user")
+    if st.st_mode & 0o077:
+        os.chmod(_STATE_DIR, 0o700)
+    return _STATE_DIR
+
+
+def open_nofollow(path, flags, mode=0o600):
+    """Open without following a final symlink, and only if it is a regular file."""
+    fd = os.open(path, flags | os.O_NOFOLLOW | os.O_CLOEXEC, mode)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"{path} is not a regular file")
+    except Exception:
+        os.close(fd)
+        raise
+    return fd
 LOCK_TIMEOUT = 5.0
 # A previous sample older than this is thrown away (suspend, long gap).
 MAX_SAMPLE_AGE = 60.0
@@ -153,7 +198,11 @@ class Sampler:
     """
 
     def __enter__(self):
-        self._lock = open(LOCK_PATH, "w")
+        state_dir()
+        # O_RDWR|O_CREAT, never O_TRUNC: the lock file's contents are
+        # irrelevant, and truncating whatever is at the path is the bug.
+        self._lock = os.fdopen(
+            open_nofollow(LOCK_PATH, os.O_RDWR | os.O_CREAT), "r+")
         deadline = time.monotonic() + LOCK_TIMEOUT
         while True:
             try:
@@ -242,7 +291,15 @@ class Sampler:
 
     @staticmethod
     def load_state():
-        raw = read(STATE_PATH)
+        raw = None
+        try:
+            fd = open_nofollow(STATE_PATH, os.O_RDONLY)
+            try:
+                raw = os.read(fd, MAX_STATE_BYTES).decode("utf-8", "replace")
+            finally:
+                os.close(fd)
+        except OSError:
+            raw = None
         if not raw:
             return None
         try:
@@ -257,13 +314,25 @@ class Sampler:
 
     @staticmethod
     def save_state(state):
-        tmp = STATE_PATH + ".tmp"
+        # mkstemp gives an exclusive, randomly named 0600 file in our own
+        # directory; nothing predictable is opened for writing.
+        tmp = None
         try:
-            with open(tmp, "w") as f:
+            state_dir()
+            fd, tmp = tempfile.mkstemp(prefix="state.", suffix=".tmp",
+                                       dir=_STATE_DIR)
+            with os.fdopen(fd, "w") as f:
                 json.dump(state, f, separators=(",", ":"))
             os.replace(tmp, STATE_PATH)
+            tmp = None
         except OSError:
             pass
+        finally:
+            if tmp is not None:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     # ---- the sample --------------------------------------------------
 
@@ -516,11 +585,11 @@ def doctor():
         "grant read access to /sys/class/powercap/intel-rapl:*/energy_uj")
 
     try:
-        os.makedirs(_RUNTIME_DIR, exist_ok=True)
-        with open(os.path.join(_RUNTIME_DIR, PLUGIN_ID + ".probe"), "w") as f:
-            f.write("ok")
-        os.remove(os.path.join(_RUNTIME_DIR, PLUGIN_ID + ".probe"))
-        add(True, "Runtime dir writable", _RUNTIME_DIR)
+        d = state_dir()
+        fd, probe = tempfile.mkstemp(prefix="probe.", dir=d)
+        os.close(fd)
+        os.unlink(probe)
+        add(True, "Runtime dir private and writable", d)
     except OSError as exc:
         add(False, "Runtime dir writable", str(exc), "export XDG_RUNTIME_DIR to a writable directory")
     try:
