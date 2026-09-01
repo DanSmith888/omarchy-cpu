@@ -17,6 +17,13 @@ BarWidget {
 
   readonly property var panel: panelLoader.item
 
+  // One source of truth for the mark, so the pill and the width it reserves
+  // can never drift apart.
+  readonly property string markGlyph: "󰘚"
+  // Middle-click lands in btop. -or-focus-tui reuses an existing btop window
+  // instead of stacking up terminals.
+  readonly property var btopCommand: ["omarchy-launch-or-focus-tui", "btop"]
+
   // Mirrors of the panel's state, so the pill has nothing to compute.
   readonly property bool devicePresent: panel ? panel.devicePresent === true : false
   readonly property bool showIcon: panel ? panel.showIcon === true : true
@@ -25,8 +32,16 @@ BarWidget {
   readonly property string pillText: {
     if (!root.devicePresent) return ""
     if (!root.showIcon) return root.readings
-    return root.readings === "" ? "󰘚" : "󰘚 " + root.readings
+    return root.readings === "" ? root.markGlyph : root.markGlyph + " " + root.readings
   }
+  // Widest form of the current pill, used only to reserve a stable width.
+  readonly property string widestPill: {
+    if (!root.devicePresent) return ""
+    var w = panel ? panel.barWidest : ""
+    if (!root.showIcon) return w
+    return w === "" ? root.markGlyph : root.markGlyph + " " + w
+  }
+
   readonly property string tooltip: {
     if (!panel) return "CPU"
     var bits = [panel.shortModel, "Load " + panel.usageText]
@@ -87,6 +102,16 @@ BarWidget {
     function refresh(): void { root.broadcast("refresh") }
   }
 
+  // Reserving the widest form keeps the pill (and everything beside it in
+  // the bar) still as digits come and go. A reading wider than the reserve
+  // — a fixed unit run past its range — still grows rather than clipping.
+  TextMetrics {
+    id: pillMetrics
+    font.family: root.bar ? root.bar.fontFamily : Style.font.family
+    font.pixelSize: Style.font.body
+    text: root.widestPill
+  }
+
   // WidgetButton, not BarIconButton: the latter is glyph-only and clips text.
   WidgetButton {
     id: button
@@ -100,8 +125,16 @@ BarWidget {
       ? root.tierColor
       : (root.bar ? root.bar.barForeground : Color.foreground)
 
+    // Reserve the widest form; the label stays centred in the slot, so the
+    // pill's neighbours never move as digits come and go.
+    fixedWidth: pillMetrics.width > 0
+      ? Math.max(pillMetrics.width, labelWidth) + scaledHorizontalMargin * 2
+      : -1
+
     onPressed: function(b) {
-      if (b === Qt.MiddleButton) root.refresh()
+      // Middle-click drops straight into btop, focusing an existing window
+      // rather than piling up terminals.
+      if (b === Qt.MiddleButton) Quickshell.execDetached(root.btopCommand)
       else root.togglePanel()
     }
   }

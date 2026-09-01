@@ -59,10 +59,13 @@ Panel {
   readonly property bool showClock: Model.asBool(setting("showClock", false), false)
   readonly property bool showIcon: Model.asBool(setting("showIcon", true), true)
   readonly property string tempSensor: String(setting("tempSensor", "auto"))
-  readonly property int busyFrom: Model.clampInt(setting("busyFrom", 50), 1, 100, 50)
-  readonly property int hotFrom: Model.clampInt(setting("hotFrom", 85), 1, 100, 85)
-  readonly property string busyColor: String(setting("busyColor", ""))
-  readonly property string hotColor: String(setting("hotColor", ""))
+  // warnFrom/alertFrom were once busyFrom/hotFrom: read the old key as the
+  // fallback so an existing bar entry keeps its thresholds and colours, and
+  // snap to the stepper's marks (an old 16 lands on 15, not 16).
+  readonly property int warnFrom: Model.clampStep(setting("warnFrom", setting("busyFrom", 50)), 5, 100, 5, 50)
+  readonly property int alertFrom: Model.clampStep(setting("alertFrom", setting("hotFrom", 85)), 5, 100, 5, 85)
+  readonly property string warnColor: String(setting("warnColor", setting("busyColor", "")))
+  readonly property string alertColor: String(setting("alertColor", setting("hotColor", "")))
   readonly property int topCount: Model.clampInt(setting("topCount", 5), 1, 10, 5)
   readonly property string temperatureUnit: Model.normalizeUnit(setting("temperatureUnit", "C"))
   readonly property int historySamples: Model.clampInt(setting("historySamples", 60), 20, 240, 60)
@@ -78,8 +81,16 @@ Panel {
     root.showTemp && root.headlineTemp !== null ? Model.degreesShort(root.headlineTemp, root.temperatureUnit) : "",
     root.showClock && root.freqMhz !== null ? Model.ghzShort(root.freqMhz) : ""
   ])
-  readonly property string tierColor: Model.loadColor(root.usage, root.busyFrom, root.hotFrom,
-                                                      root.busyColor, root.hotColor)
+  // Same shape as barText but with every field at its widest, so the pill
+  // can reserve a stable column and stop shuffling its neighbours every
+  // time a reading crosses 9 -> 10 -> 100.
+  readonly property string barWidest: Model.barText([
+    root.showUsage ? "100%" : "",
+    root.showTemp && root.headlineTemp !== null ? "100\u00b0" : "",
+    root.showClock && root.freqMhz !== null ? "9.9GHz" : ""
+  ])
+  readonly property string tierColor: Model.loadColor(root.usage, root.warnFrom, root.alertFrom,
+                                                      root.warnColor, root.alertColor)
   readonly property var refreshChips: [
     { value: "1000", label: "1s" },
     { value: "2000", label: "2s" },
@@ -119,10 +130,10 @@ Panel {
   function setShowClock(v) { persistSettings({ showClock: !!v }) }
   function setShowIcon(v) { persistSettings({ showIcon: !!v }) }
   function setTempSensor(v) { persistSettings({ tempSensor: String(v || "auto") }) }
-  function setBusyFrom(v) { persistSettings({ busyFrom: Model.clampInt(v, 1, 100, 50) }) }
-  function setHotFrom(v) { persistSettings({ hotFrom: Model.clampInt(v, 1, 100, 85) }) }
-  function setBusyColor(hex) { persistSettings({ busyColor: String(hex) }) }
-  function setHotColor(hex) { persistSettings({ hotColor: String(hex) }) }
+  function setWarnFrom(v) { persistSettings({ warnFrom: Model.clampStep(v, 5, 100, 5, 50) }) }
+  function setAlertFrom(v) { persistSettings({ alertFrom: Model.clampStep(v, 5, 100, 5, 85) }) }
+  function setWarnColor(hex) { persistSettings({ warnColor: String(hex) }) }
+  function setAlertColor(hex) { persistSettings({ alertColor: String(hex) }) }
   function setTopCount(v) { persistSettings({ topCount: Model.clampInt(v, 1, 10, 5) }) }
   function setTemperatureUnit(v) { persistSettings({ temperatureUnit: Model.normalizeUnit(v) }) }
   function setHistorySamples(v) { persistSettings({ historySamples: Model.clampInt(v, 20, 240, 60) }) }
@@ -316,8 +327,8 @@ Panel {
                   height: Math.max(1, coreCell.height * Math.min(1, coreCell.load / 100))
                   radius: Style.cornerRadius > 0 ? Style.space(2) : 0
                   color: {
-                    var c = Model.loadColor(coreCell.load, root.busyFrom, root.hotFrom,
-                                            root.busyColor, root.hotColor)
+                    var c = Model.loadColor(coreCell.load, root.warnFrom, root.alertFrom,
+                                            root.warnColor, root.alertColor)
                     return c !== "" ? c : Color.accent
                   }
                   Behavior on height { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
@@ -563,11 +574,11 @@ Panel {
           PanelSeparator { width: parent.width; foreground: root.barForeground }
 
           // ---------- Load colours ----------
-          PanelSectionHeader { text: "LOAD COLORS"; foreground: root.barForeground }
+          PanelSectionHeader { text: "WARNING & ALERT"; foreground: root.barForeground }
 
           Text {
             width: parent.width
-            text: "The pill, the hero mark and the core bars change color once load passes each mark. ∅ keeps the normal bar color."
+            text: "The pill, the hero mark and the core bars change color once load passes the warning and alert marks. ∅ keeps the normal bar color."
             color: Qt.darker(root.barForeground, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -580,7 +591,7 @@ Panel {
 
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: "Busy from"
+              text: "Warning from"
               color: Qt.darker(root.barForeground, 1.4)
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
@@ -588,14 +599,15 @@ Panel {
 
             NumberField {
               label: ""
-              value: root.busyFrom
-              from: 1
+              value: root.warnFrom
+              // Steps land on multiples of 5, not 1/6/11.
+              from: 5
               to: 100
               stepSize: 5
               foreground: root.barForeground
               accent: Color.accent
               field.editable: false
-              onModified: function(value) { root.setBusyFrom(value) }
+              onModified: function(value) { root.setWarnFrom(value) }
             }
 
             Text {
@@ -610,9 +622,9 @@ Panel {
           SwatchRow {
             width: parent.width
             choices: root.colorChoices
-            selected: root.busyColor
+            selected: root.warnColor
             foreground: root.barForeground
-            onPicked: function(hex) { root.setBusyColor(hex) }
+            onPicked: function(hex) { root.setWarnColor(hex) }
           }
 
           Row {
@@ -621,7 +633,7 @@ Panel {
 
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: "Hot from"
+              text: "Alert from"
               color: Qt.darker(root.barForeground, 1.4)
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
@@ -629,14 +641,14 @@ Panel {
 
             NumberField {
               label: ""
-              value: root.hotFrom
-              from: 1
+              value: root.alertFrom
+              from: 5
               to: 100
               stepSize: 5
               foreground: root.barForeground
               accent: Color.accent
               field.editable: false
-              onModified: function(value) { root.setHotFrom(value) }
+              onModified: function(value) { root.setAlertFrom(value) }
             }
 
             Text {
@@ -651,9 +663,9 @@ Panel {
           SwatchRow {
             width: parent.width
             choices: root.colorChoices
-            selected: root.hotColor
+            selected: root.alertColor
             foreground: root.barForeground
-            onPicked: function(hex) { root.setHotColor(hex) }
+            onPicked: function(hex) { root.setAlertColor(hex) }
           }
         }
       }

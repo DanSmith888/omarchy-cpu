@@ -32,10 +32,10 @@
       "tempSensor": "auto",
       "temperatureUnit": "C",
       "historySamples": 60,
-      "busyFrom": 50,
-      "hotFrom": 85,
-      "busyColor": "",
-      "hotColor": "",
+      "warnFrom": 50,
+      "alertFrom": 85,
+      "warnColor": "",
+      "alertColor": "",
       "topCount": 5
     },
     "schema": [
@@ -96,19 +96,19 @@
         "defaultValue": 60
       },
       {
-        "key": "busyFrom",
+        "key": "warnFrom",
         "type": "integer",
-        "label": "Busy from (%)",
-        "min": 1,
+        "label": "Warning from (%)",
+        "min": 5,
         "max": 100,
         "step": 5,
         "defaultValue": 50
       },
       {
-        "key": "hotFrom",
+        "key": "alertFrom",
         "type": "integer",
-        "label": "Hot from (%)",
-        "min": 1,
+        "label": "Alert from (%)",
+        "min": 5,
         "max": 100,
         "step": 5,
         "defaultValue": 85

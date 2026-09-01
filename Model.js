@@ -42,6 +42,16 @@ function clampInt(v, lo, hi, fallback) {
   return Math.max(lo, Math.min(hi, n))
 }
 
+// Clamp and snap to a step, so a value carried over from an older config
+// (or typed by hand) lands on the same marks the stepper walks.
+function clampStep(v, lo, hi, step, fallback) {
+  var n = num(v, fallback)
+  if (!isFinite(n)) n = fallback
+  var st = Math.max(1, Math.round(num(step, 1)))
+  n = Math.round(n / st) * st
+  return Math.max(lo, Math.min(hi, n))
+}
+
 function asBool(v, fallback) {
   if (v === true || v === "true" || v === 1) return true
   if (v === false || v === "false" || v === 0) return false
@@ -101,12 +111,13 @@ function barText(parts) {
 
 // ---- colours ------------------------------------------------------------
 
-// Load band colour: "" (normal) under busyFrom, busyColor from busyFrom,
-// hotColor from hotFrom. Either colour may be "" to keep the normal colour.
-function loadColor(usage, busyFrom, hotFrom, busyColor, hotColor) {
+// Load band colour: "" (normal) below the warning mark, warnColor from the
+// warning mark, alertColor from the alert mark. Either colour may be "" to
+// keep the bar's own colour.
+function loadColor(usage, warnFrom, alertFrom, warnColor, alertColor) {
   if (!isNum(usage)) return ""
-  if (usage >= hotFrom) return hotColor
-  if (usage >= busyFrom) return busyColor
+  if (usage >= alertFrom) return alertColor
+  if (usage >= warnFrom) return warnColor
   return ""
 }
 

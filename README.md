@@ -46,8 +46,10 @@ folder and two files in `$XDG_RUNTIME_DIR`.
 
 ## Using it
 
-**Left-click** the pill to open the panel. **Middle-click** forces a
-refresh. Esc closes. To open it from a hotkey:
+**Left-click** the pill to open the panel. **Middle-click** opens `btop`,
+reusing an existing btop window rather than stacking up terminals. **Hover**
+for the model and full readings. Esc closes. To open the panel from a
+hotkey:
 
 ```bash
 omarchy-shell shell toggle dansmith888.cpu
@@ -64,7 +66,7 @@ omarchy-shell shell toggle dansmith888.cpu
 | **Temperature** | Every label the CPU's hwmon reports (Tctl, Tccd1, …), headline one in bold |
 | **Top processes** | Busiest processes since the last sample, as a share of one core (like `top`) |
 | **In the bar** | Which readings the pill shows, refresh rate, °C/°F, graph history |
-| **Load colors** | Two thresholds and a color each, taken from your live Omarchy theme |
+| **Warning & alert** | Two thresholds and a color each, taken from your live Omarchy theme; the pill, hero mark and core bars follow them |
 
 Settings are stored inline on the widget's `~/.config/omarchy/shell.json`
 entry and apply immediately.
@@ -73,6 +75,7 @@ entry and apply immediately.
 
 - Omarchy (Quattro or later)
 - Linux with `/proc` mounted — that's it
+- `btop`, only for the middle-click shortcut
 
 Temperatures come from `k10temp`, `zenpower`, `coretemp`, `cpu_thermal` or
 `acpitz`, whichever is present, with thermal zones as a fallback. Machines
@@ -94,6 +97,10 @@ cpuctl doctor              check every link from /proc to the bar
 - Process percentages are shares of **one** core, so a busy 4-thread job
   can read 400%, the same way `top` reports it.
 - Used memory follows `MemAvailable`, so reclaimable cache is not counted.
+- The pill reserves the width of its widest reading (`100% 100° 9.9GHz`),
+  so nothing in the bar shifts as digits come and go.
+- The warning and alert thresholds were once called busy and hot; an
+  existing bar entry keeps its old `busyFrom`/`hotColor` values.
 
 ## What runs, and as whom
 
