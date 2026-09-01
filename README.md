@@ -181,9 +181,8 @@ as one thing in the bar:
   temperature, memory, top processes
 - [omarchy-gpu](https://github.com/DanSmith888/omarchy-gpu) — load, VRAM,
   power, sensors, GPU clients
-- [omarchy-network-speed](https://github.com/DanSmith888/omarchy-network-speed)
-  — download and upload, per-app bandwidth (a fork of
-  [csawy3r's plugin](https://github.com/csawy3r/omarchy-network-speed))
+- [omarchy-network](https://github.com/DanSmith888/omarchy-network) —
+  download and upload, history graphs, per-app bandwidth
 
 ## Credits
 
