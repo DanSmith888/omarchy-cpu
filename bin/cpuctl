@@ -36,6 +36,9 @@ MAX_SAMPLE_AGE = 60.0
 # very first poll still has a rate instead of null.
 FIRST_SAMPLE_GAP = 0.25
 TOP_DEFAULT = 5
+# Ceiling on the pids carried between samples. The state file is rewritten on
+# every poll, so it cannot be allowed to grow with the process table.
+MAX_TRACKED_PROCS = 512
 # Longest process name we hand to the UI; anything longer is a command line,
 # not a name.
 NAME_MAX = 24
@@ -45,6 +48,17 @@ NAME_MAX = 24
 # unreadable and every power reading comes back None. Grant read access and it
 # starts working with no other change.
 RAPL_GLOB = "/sys/class/powercap/intel-rapl:[0-9]*"
+
+# A process name is whatever a local program chose to call itself, and it ends
+# up in the panel and in the bar's tooltip, which renders with a Text that
+# auto-detects rich text. Keep a conservative printable subset so a name can
+# never carry markup into a UI sink.
+_NAME_OK = re.compile(r"[^A-Za-z0-9 ._+@:-]")
+
+
+def safe_name(value):
+    out = _NAME_OK.sub("", str(value or ""))[:NAME_MAX].strip()
+    return out or "?"
 
 # hwmon drivers that report the CPU, best first.
 CPU_HWMON = ("k10temp", "zenpower", "coretemp", "cpu_thermal", "soc_thermal", "acpitz")
@@ -221,8 +235,8 @@ class Sampler:
             first = raw.split("\0", 1)[0].split()[0] if raw.split("\0", 1)[0].strip() else ""
             base = os.path.basename(first)[:NAME_MAX]
             if base and (base.startswith(comm) or len(comm) >= 15):
-                return base
-        return comm[:NAME_MAX]
+                return safe_name(base)
+        return safe_name(comm)
 
     # ---- state -------------------------------------------------------
 
@@ -319,8 +333,11 @@ class Sampler:
                 # other than elapsed time; report nothing rather than nonsense.
                 watts = round(w, 1) if 0 <= w < 1000 else None
 
+        # Keep only the busiest pids: enough for a meaningful top list, and a
+        # bound on what gets written back every poll.
+        busiest = sorted(procs.items(), key=lambda kv: -kv[1][0])[:MAX_TRACKED_PROCS]
         self.save_state({"ts": now, "total": stat["total"], "cores": stat["cores"],
-                         "procs": {str(p): v[0] for p, v in procs.items()},
+                         "procs": {str(pid): v[0] for pid, v in busiest},
                          "energy": energy})
 
         return {
