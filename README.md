@@ -65,9 +65,8 @@ omarchy-shell shell toggle dansmith888.cpu
 | **Load / Memory** | Total CPU load and used RAM, with the 1/5/15 load average underneath |
 | **Cores** | One bar per hardware thread; hover for the number |
 | **Temperature** | Every label the CPU's hwmon reports (Tctl, Tccd1, …), headline one in bold |
-| **Top processes** | Busiest processes since the last sample, as a share of the whole chip or of one core |
+| **Top processes** | Busiest processes since the last sample, as a share of one core — four cores busy reads 400%, like `top` |
 | **In the bar** | Which readings the pill shows, refresh rate, °C/°F, graph history |
-| **Process CPU scale** | Whole CPU · 100% (everything at full tilt sums to 100%) or Per core · 2400% (what `top` and `htop` show). The maximum is your machine's thread count × 100 |
 | **Power** | Package watts when the energy counter is readable — optional, see below |
 | **Layout** | Pin the pill to a fixed width, or leave it to size itself |
 | **Warning & alert** | Two thresholds and a color each, taken from your live Omarchy theme; the pill, hero mark and core bars follow them |
@@ -99,11 +98,10 @@ cpuctl doctor              check every link from /proc to the bar
 
 - Load is a delta between two samples. The first reading after a boot or a
   long gap takes a 0.25 s second sample so it still means something.
-- Process percentages default to **Whole CPU · 100%**: a share of the entire
-  chip, so everything running flat out adds up to 100% and one pinned thread
-  on a 24-thread machine reads about 4%. Switch to **Per core · 2400%** under
-  Process list for what `top` and `htop` show, where that same thread reads
-  100% and a busy 4-thread job reads 400%. `cpuctl top` on the command line always reports the one-core figure,
+- Process percentages follow the `top` convention: a share of one core, so a
+  process using four cores reads 400% and one saturating a 24-thread machine
+  reads about 2400%. The **Load** reading is the separate machine-wide
+  figure, and is always 0–100%. `cpuctl top` on the command line always reports the one-core figure,
   since that is what the `/proc` deltas measure.
 - Used memory follows `MemAvailable`, so reclaimable cache is not counted.
 - The pill reserves the width of its widest reading (`100% 100° 9.9GHz`),

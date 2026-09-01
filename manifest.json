@@ -38,7 +38,6 @@
       "warnColor": "",
       "alertColor": "",
       "topCount": 5,
-      "processScale": "total",
       "pptWatts": 0
     },
     "schema": [
@@ -134,17 +133,6 @@
         "max": 10,
         "step": 1,
         "defaultValue": 5
-      },
-      {
-        "key": "processScale",
-        "type": "enum",
-        "label": "Process CPU shown as",
-        "options": [
-          "total",
-          "core"
-        ],
-        "defaultValue": "total",
-        "description": "total: a share of the whole chip, so everything running flat out adds up to 100%. core: what top and htop show, where one busy thread reads 100% and a 24-thread machine totals 2400%."
       },
       {
         "key": "pptWatts",

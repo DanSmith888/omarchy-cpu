@@ -54,7 +54,7 @@ BarWidget {
       ["Power", panel.powerEnabled ? panel.powerText : ""],
       ["Load average", panel.loadAvgText],
       ["Cores", panel.coreSummary],
-      ["Busiest", top ? top.name + "  " + Model.pctSmall(Model.processPct(top.cpu, panel.threads, panel.processScale)) : ""]
+      ["Busiest", top ? top.name + "  " + Model.pctSmall(top.cpu) : ""]
     ])
   }
 

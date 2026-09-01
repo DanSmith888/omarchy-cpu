@@ -80,22 +80,6 @@ Panel {
   readonly property int pillWidth: Model.clampInt(setting("pillWidth", 0), 0, 400, 0)
   // "total" = share of the whole CPU (all threads at 100% reads 100%).
   // "core"  = share of one core, the top(1) convention.
-  readonly property string processScale: setting("processScale", "total") === "core" ? "core" : "total"
-  // Rebuilt whenever the thread count changes rather than bound inline: the
-  // label is evaluated before the first poll lands, and a stale binding left
-  // "Per core" reading 100% instead of the machine's real maximum.
-  property var processScaleChips: []
-  readonly property int perCoreMax: root.threads > 0 ? root.threads * 100 : 100
-  function rebuildProcessScaleChips() {
-    root.processScaleChips = [
-      { value: "total", label: "Whole CPU · 100%",
-        tooltip: "Every process's share of the entire chip. Everything running flat out adds up to 100%." },
-      { value: "core", label: "Per core · " + root.perCoreMax + "%",
-        tooltip: "What top and htop show: one fully busy thread reads 100%, so this machine totals " + root.perCoreMax + "%." }
-    ]
-  }
-  onPerCoreMaxChanged: rebuildProcessScaleChips()
-
   readonly property int topCount: Model.clampInt(setting("topCount", 5), 1, 10, 5)
   readonly property string temperatureUnit: Model.normalizeUnit(setting("temperatureUnit", "C"))
   readonly property int historySamples: Model.clampInt(setting("historySamples", 60), 20, 240, 60)
@@ -190,7 +174,6 @@ Panel {
   function setWarnColor(hex) { persistSettings({ warnColor: String(hex) }) }
   function setAlertColor(hex) { persistSettings({ alertColor: String(hex) }) }
   function setPptWatts(v) { persistSettings({ pptWatts: Model.clampInt(v, 0, 1000, 0) }) }
-  function setProcessScale(v) { persistSettings({ processScale: String(v) === "core" ? "core" : "total" }) }
   function setPillWidth(v) { persistSettings({ pillWidth: Model.clampInt(v, 0, 400, 0) }) }
   function setTopCount(v) { persistSettings({ topCount: Model.clampInt(v, 1, 10, 5) }) }
   function setTemperatureUnit(v) { persistSettings({ temperatureUnit: Model.normalizeUnit(v) }) }
@@ -209,7 +192,6 @@ Panel {
   }
   Component.onCompleted: {
     refreshThemeColors()
-    rebuildProcessScaleChips()
   }
 
   Process {
@@ -527,7 +509,7 @@ Panel {
 
               Text {
                 id: procValue
-                text: Model.pctSmall(Model.processPct(modelData.cpu, root.threads, root.processScale))
+                text: Model.pctSmall(modelData.cpu)
                 color: root.barForeground
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
@@ -681,87 +663,6 @@ Panel {
             accent: Color.accent
             fontFamily: Style.font.family
             onChanged: function(value) { root.setHistorySamples(value) }
-          }
-
-          PanelSeparator { width: parent.width; foreground: root.barForeground }
-
-          PanelSectionHeader { text: "PROCESS CPU SCALE"; foreground: root.barForeground }
-
-          Text {
-            width: parent.width
-            text: "What a process's percentage is measured against.\n\nWhole CPU · 100% — a share of the entire chip. One pinned thread on this " + root.threads + "-thread machine reads about " + (root.threads > 0 ? (100 / root.threads).toFixed(1) : "100") + "%, and everything at full tilt adds up to 100%.\n\nPer core · " + (root.threads > 0 ? root.threads * 100 : 100) + "% — what top and htop show. That same pinned thread reads 100%, a busy four-thread job reads 400%, and the whole machine flat out totals " + (root.threads > 0 ? root.threads * 100 : 100) + "%."
-            color: Qt.darker(root.barForeground, 1.4)
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
-
-          ButtonGroup {
-            value: root.processScale
-            options: root.processScaleChips
-            foreground: root.barForeground
-            background: Color.background
-            accent: Color.accent
-            fontFamily: Style.font.family
-            onChanged: function(value) { root.setProcessScale(value) }
-          }
-
-          PanelSeparator {
-            width: parent.width
-            foreground: root.barForeground
-            visible: root.powerEnabled
-          }
-
-          PanelSectionHeader {
-            text: "POWER"
-            foreground: root.barForeground
-            visible: root.powerEnabled
-          }
-
-          Text {
-            width: parent.width
-            visible: root.powerEnabled
-            text: root.powerHasScale
-              ? "Measured from the CPU's energy counter, against the limit below."
-              : "Measured from the CPU's energy counter. AMD reports no power limit, so there is nothing to measure it against — enter your CPU's PPT below for a bar and a total, or leave it at 0 to just show the wattage."
-            color: Qt.darker(root.barForeground, 1.4)
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
-
-          Row {
-            width: parent.width
-            visible: root.powerEnabled
-            spacing: Style.space(8)
-
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              text: "PPT"
-              color: Qt.darker(root.barForeground, 1.4)
-              font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
-            }
-
-            NumberField {
-              label: ""
-              value: root.pptWatts
-              from: 0
-              to: 1000
-              stepSize: 1
-              foreground: root.barForeground
-              accent: Color.accent
-              field.editable: false
-              onModified: function(value) { root.setPptWatts(value) }
-            }
-
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              text: "W  (0 = no total)"
-              color: Qt.darker(root.barForeground, 1.4)
-              font.family: Style.font.family
-              font.pixelSize: Style.font.bodySmall
-            }
           }
 
           PanelSeparator { width: parent.width; foreground: root.barForeground }

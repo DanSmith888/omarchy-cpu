@@ -119,17 +119,6 @@ function barText(parts) {
   return out.join(" ")
 }
 
-// Per-process CPU share. The backend reports the top(1) convention — percent
-// of one core, so a busy 24-thread box can read 2400% — because that is what
-// /proc/<pid>/stat deltas actually measure. "total" divides by the thread
-// count so the whole machine at full tilt reads 100%.
-function processPct(cpu, threads, scale) {
-  if (!isNum(cpu)) return null
-  if (scale === "core") return cpu
-  var n = Math.max(1, Math.round(num(threads, 1)))
-  return cpu / n
-}
-
 // ---- colours ------------------------------------------------------------
 
 // Load band colour: "" (normal) below the warning mark, warnColor from the
