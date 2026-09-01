@@ -82,6 +82,28 @@ def rapl_domains():
     return out
 
 
+def rapl_power_limit_w():
+    """The package power limit the kernel reports, in watts, or None.
+
+    Intel's RAPL exposes the configured limit; AMD's does not, so this is
+    None on most AMD boxes and the caller falls back to auto-ranging. No
+    model lookup table: a table would be a guess, and wrong for anyone whose
+    part shares a name across TDPs or who has changed the limit in firmware.
+    """
+    best = None
+    for d in sorted(glob.glob(RAPL_GLOB)):
+        name = (read(os.path.join(d, "name")) or "").strip()
+        if not name.startswith("package"):
+            continue
+        for key in ("constraint_0_max_power_uw", "constraint_0_power_limit_uw",
+                    "constraint_1_max_power_uw", "constraint_1_power_limit_uw"):
+            uw = read_int(os.path.join(d, key))
+            if uw and uw > 0:
+                best = (best or 0) + uw / 1e6
+                break
+    return round(best) if best else None
+
+
 def rapl_energy_uj():
     """Total package energy in microjoules, or None when it can't be read.
 
@@ -444,6 +466,8 @@ def get(top_n=TOP_DEFAULT):
     state["sensor"] = temps["sensor"]
     state["temps"] = temps["temps"]
     state["tempC"] = pick_temp(temps["temps"])
+    state["powerPresent"] = bool(rapl_domains())
+    state["powerLimitW"] = rapl_power_limit_w()
     state["load"] = load_avg()
     state.update(memory())
     return state
@@ -544,7 +568,8 @@ def print_human(state):
     if state["load"]:
         print("  load    " + "  ".join(f"{v:.2f}" for v in state["load"]))
     if state["packageW"] is not None:
-        print(f"  power   {state['packageW']} W  (package)")
+        cap = f" of {state['powerLimitW']} W" if state.get("powerLimitW") else ""
+        print(f"  power   {state['packageW']} W{cap}")
     if state["memUsedPct"] is not None:
         print(f"  memory  {state['memUsedGiB']} / {state['memTotalGiB']} GiB ({state['memUsedPct']}%)")
     if state["top"]:

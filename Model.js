@@ -180,13 +180,16 @@ function tooltip(title, rows) {
   for (var j = 0; j < list.length; j++)
     out.push(padRight(list[j][0], w) + "   " + String(list[j][1]))
 
-  // The bar centres every line of a tooltip independently, which leaves the
-  // label column ragged no matter how the labels are padded. Padding each
-  // line out to the same length makes centring indistinguishable from left
-  // alignment, so the columns line up. (Relies on the tooltip's monospace
-  // font, which is the bar's own.)
+  // Bar.qml centres each line of a tooltip (Text.AlignHCenter), so the only
+  // way to get a left-aligned block is to make every line the same rendered
+  // width. Ordinary trailing spaces cannot do it: Qt trims trailing
+  // whitespace when laying a line out, so the padding is discarded and the
+  // line re-centres. A non-breaking space is not trimmed, and is the same
+  // width as a space in the bar's monospace font.
   var line = 0
   for (var k = 0; k < out.length; k++) line = Math.max(line, out[k].length)
-  for (var n = 0; n < out.length; n++) out[n] = padRight(out[n], line)
+  for (var n = 0; n < out.length; n++) {
+    while (out[n].length < line) out[n] += "\u00a0"
+  }
   return out.join("\n")
 }

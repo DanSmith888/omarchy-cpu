@@ -42,6 +42,11 @@ Panel {
   property string sensor: ""
   property var loadAvg: null
   property var packageW: null
+  property bool powerPresent: false
+  property var powerLimitW: null
+  // Highest wattage seen this session — the last-resort scale when neither a
+  // manual setting nor the TDP table gives one.
+  property real powerSeen: 0
   property var memUsedPct: null
   property var memUsedGiB: null
   property var memTotalGiB: null
@@ -68,6 +73,8 @@ Panel {
   readonly property int alertFrom: Model.clampStep(setting("alertFrom", setting("hotFrom", 85)), 5, 100, 5, 85)
   readonly property string warnColor: String(setting("warnColor", setting("busyColor", "")))
   readonly property string alertColor: String(setting("alertColor", setting("hotColor", "")))
+  readonly property int powerScaleW: Model.clampInt(setting("powerScaleW", 0), 0, 1000, 0)
+  readonly property int pillWidth: Model.clampInt(setting("pillWidth", 0), 0, 400, 0)
   readonly property int topCount: Model.clampInt(setting("topCount", 5), 1, 10, 5)
   readonly property string temperatureUnit: Model.normalizeUnit(setting("temperatureUnit", "C"))
   readonly property int historySamples: Model.clampInt(setting("historySamples", 60), 20, 240, 60)
@@ -83,6 +90,17 @@ Panel {
     ? Model.load(root.loadAvg[0]) + "  " + Model.load(root.loadAvg[1]) + "  " + Model.load(root.loadAvg[2])
     : ""
   readonly property string powerText: Model.watts(root.packageW)
+  // What the power bar is measured against: an explicit setting first, then
+  // the limit the kernel actually reports (Intel RAPL exposes one, AMD
+  // usually does not), then the highest reading seen this session.
+  readonly property real powerCeiling: powerScaleW > 0
+    ? powerScaleW
+    : (powerLimitW !== null ? powerLimitW : powerSeen)
+  readonly property string powerScaleNote: powerScaleW > 0
+    ? "scaled to " + powerScaleW + " W, set below"
+    : (powerLimitW !== null
+        ? "scaled to the " + powerLimitW + " W limit the kernel reports"
+        : "scaled to the highest reading so far")
   readonly property string coreSummary: root.cores > 0 ? root.cores + " cores / " + root.threads + " threads" : ""
   readonly property string barText: Model.barText([
     root.showUsage ? Model.pct(root.usage) : "",
@@ -102,6 +120,7 @@ Panel {
   readonly property string tierColor: Model.loadColor(root.usage, root.warnFrom, root.alertFrom,
                                                       root.warnColor, root.alertColor)
   readonly property var refreshChips: [
+    { value: "500", label: "0.5s" },
     { value: "1000", label: "1s" },
     { value: "2000", label: "2s" },
     { value: "3000", label: "3s" },
@@ -145,6 +164,8 @@ Panel {
   function setAlertFrom(v) { persistSettings({ alertFrom: Model.clampStep(v, 5, 100, 5, 85) }) }
   function setWarnColor(hex) { persistSettings({ warnColor: String(hex) }) }
   function setAlertColor(hex) { persistSettings({ alertColor: String(hex) }) }
+  function setPowerScaleW(v) { persistSettings({ powerScaleW: Model.clampInt(v, 0, 1000, 0) }) }
+  function setPillWidth(v) { persistSettings({ pillWidth: Model.clampInt(v, 0, 400, 0) }) }
   function setTopCount(v) { persistSettings({ topCount: Model.clampInt(v, 1, 10, 5) }) }
   function setTemperatureUnit(v) { persistSettings({ temperatureUnit: Model.normalizeUnit(v) }) }
   function setHistorySamples(v) { persistSettings({ historySamples: Model.clampInt(v, 20, 240, 60) }) }
@@ -186,6 +207,10 @@ Panel {
           root.sensor = d.sensor || ""
           root.loadAvg = d.load || null
           root.packageW = (typeof d.packageW === "number") ? d.packageW : null
+          root.powerPresent = d.powerPresent === true
+          root.powerLimitW = (typeof d.powerLimitW === "number") ? d.powerLimitW : null
+          if (root.packageW !== null && root.packageW > root.powerSeen)
+            root.powerSeen = root.packageW
           root.memUsedPct = (typeof d.memUsedPct === "number") ? d.memUsedPct : null
           root.memUsedGiB = (typeof d.memUsedGiB === "number") ? d.memUsedGiB : null
           root.memTotalGiB = (typeof d.memTotalGiB === "number") ? d.memTotalGiB : null
@@ -288,6 +313,26 @@ Panel {
 
           MeterRow {
             width: parent.width
+            visible: root.packageW !== null
+            label: "Power"
+            // Scale: the setting, else the kernel's reported limit, else
+            // auto-range against the highest reading seen.
+            value: root.powerCeiling > 0 ? 100 * root.packageW / root.powerCeiling : 0
+            valueText: root.powerText
+            fill: Color.accent
+          }
+
+          Text {
+            width: parent.width
+            visible: root.powerPresent && root.packageW === null
+            text: "Package power needs read access to the RAPL counter — see the README."
+            color: Qt.darker(root.barForeground, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+          MeterRow {
+            width: parent.width
             visible: root.memUsedPct !== null
             label: "Memory"
             value: root.memUsedPct === null ? 0 : root.memUsedPct
@@ -307,14 +352,6 @@ Panel {
             font.pixelSize: Style.font.bodySmall
           }
 
-          Text {
-            width: parent.width
-            visible: root.packageW !== null
-            text: "Package power  " + root.powerText
-            color: Qt.darker(root.barForeground, 1.4)
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-          }
 
           PanelSeparator { width: parent.width; foreground: root.barForeground }
 
@@ -604,6 +641,87 @@ Panel {
             onChanged: function(value) { root.setHistorySamples(value) }
           }
 
+          PanelSeparator {
+            width: parent.width
+            foreground: root.barForeground
+            visible: root.powerPresent
+          }
+
+          PanelSectionHeader {
+            text: "POWER"
+            foreground: root.barForeground
+            visible: root.powerPresent
+          }
+
+          Text {
+            width: parent.width
+            visible: root.powerPresent
+            text: "Most AMD machines report no package power limit, so the bar grows to fit the highest reading instead. Set your CPU's TDP here for a fixed scale. Currently " + root.powerScaleNote + "."
+            color: Qt.darker(root.barForeground, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Row {
+            width: parent.width
+            visible: root.powerPresent
+            spacing: Style.space(8)
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Power scale"
+              color: Qt.darker(root.barForeground, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            NumberField {
+              label: ""
+              value: root.powerScaleW
+              from: 0
+              to: 1000
+              stepSize: 5
+              foreground: root.barForeground
+              accent: Color.accent
+              field.editable: false
+              onModified: function(value) { root.setPowerScaleW(value) }
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: "W  (0 = auto)"
+              color: Qt.darker(root.barForeground, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+
+          PanelSeparator { width: parent.width; foreground: root.barForeground }
+
+          PanelSectionHeader { text: "LAYOUT"; foreground: root.barForeground }
+
+          Text {
+            width: parent.width
+            text: "Width of the reading in pixels. 0 fits the reading and holds that width so the bar stays still."
+            color: Qt.darker(root.barForeground, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          NumberField {
+            label: ""
+            value: root.pillWidth
+            from: 0
+            to: 400
+            stepSize: 2
+            foreground: root.barForeground
+            accent: Color.accent
+            field.editable: false
+            onModified: function(value) { root.setPillWidth(value) }
+          }
+
           PanelSeparator { width: parent.width; foreground: root.barForeground }
 
           // ---------- Load colours ----------
@@ -716,9 +834,12 @@ Panel {
 
     Row {
       width: meter.width
+      spacing: Style.space(8)
 
       Text {
-        width: meter.width - meterValue.width
+        // Floor it: a fractional remainder rounds the value text past the
+        // panel edge and clips its last character.
+        width: Math.floor(meter.width - meterValue.width - parent.spacing)
         text: meter.label
         color: Qt.darker(root.barForeground, 1.4)
         font.family: Style.font.family

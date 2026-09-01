@@ -150,9 +150,12 @@ BarWidget {
 
     // The label stays centred in the reserved slot. pillMetrics is in the
     // max so a reading can never be clipped by a stale reserve.
-    fixedWidth: pillMetrics.width > 0
-      ? Math.max(root.reservedWidth, pillMetrics.width, labelWidth) + scaledHorizontalMargin * 2
-      : -1
+    // A pinned width from the LAYOUT section overrides the reserve.
+    fixedWidth: (panel && panel.pillWidth > 0)
+      ? panel.pillWidth
+      : (pillMetrics.width > 0
+          ? Math.max(root.reservedWidth, pillMetrics.width, labelWidth) + scaledHorizontalMargin * 2
+          : -1)
 
     onPressed: function(b) {
       // Middle-click drops straight into btop, focusing an existing window
