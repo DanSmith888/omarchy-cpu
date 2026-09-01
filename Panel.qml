@@ -76,6 +76,11 @@ Panel {
   readonly property string usageText: Model.pct(root.usage)
   readonly property string tempText: Model.degrees(root.headlineTemp, root.temperatureUnit)
   readonly property string clockText: Model.ghz(root.freqMhz)
+  readonly property string vramLikeMemoryText: Model.gib(root.memUsedGiB) + " / " + Model.gib(root.memTotalGiB)
+  readonly property string loadAvgText: root.loadAvg
+    ? Model.load(root.loadAvg[0]) + "  " + Model.load(root.loadAvg[1]) + "  " + Model.load(root.loadAvg[2])
+    : ""
+  readonly property string coreSummary: root.cores > 0 ? root.cores + " cores / " + root.threads + " threads" : ""
   readonly property string barText: Model.barText([
     root.showUsage ? Model.pct(root.usage) : "",
     root.showTemp && root.headlineTemp !== null ? Model.degreesShort(root.headlineTemp, root.temperatureUnit) : "",
@@ -249,7 +254,7 @@ Panel {
             fontFamily: Style.font.family
             iconComponent: Component {
               Text {
-                text: "󰘚"
+                text: "󰍛"
                 color: root.tierColor !== "" ? root.tierColor : root.barForeground
                 font.family: Style.font.family
                 font.pixelSize: Style.font.display
@@ -452,7 +457,7 @@ Panel {
           Toggle {
             width: parent.width
             label: "Chip icon"
-            description: "󰘚 in front of the readings."
+            description: "󰍛 in front of the readings."
             checked: root.showIcon
             foreground: root.barForeground
             accent: Color.accent

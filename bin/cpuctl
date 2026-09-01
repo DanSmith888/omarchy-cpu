@@ -23,7 +23,7 @@ import time
 PLUGIN_ID = "dansmith888.cpu"
 REPO_URL = "https://github.com/DanSmith888/omarchy-cpu.git"
 REQUIRED_FILES = ("manifest.json", "BarWidget.qml", "Panel.qml", "Model.js",
-                  "bin/cpustatus", "bin/cpuctl")
+                  "Sparkline.qml", "bin/cpustatus", "bin/cpuctl")
 
 # Never /tmp: a predictable shared path could be pre-created by another user.
 _RUNTIME_DIR = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
@@ -36,6 +36,9 @@ MAX_SAMPLE_AGE = 60.0
 # very first poll still has a rate instead of null.
 FIRST_SAMPLE_GAP = 0.25
 TOP_DEFAULT = 5
+# Longest process name we hand to the UI; anything longer is a command line,
+# not a name.
+NAME_MAX = 24
 
 # hwmon drivers that report the CPU, best first.
 CPU_HWMON = ("k10temp", "zenpower", "coretemp", "cpu_thermal", "soc_thermal", "acpitz")
@@ -139,14 +142,20 @@ class Sampler:
 
     @staticmethod
     def nice_name(pid, comm):
-        """Basename of argv[0] when it is longer than the 15-char comm."""
+        """A short, readable name: /proc/<pid>/comm, widened from argv[0] only
+        when comm is truncated (it caps at 15 chars).
+
+        argv[0] needs care. Chromium and friends rewrite their cmdline as one
+        space-separated string rather than NUL-separated argv, so splitting on
+        NUL alone hands back the entire 400-character command line.
+        """
         raw = read(f"/proc/{pid}/cmdline")
         if raw:
-            first = raw.split("\0", 1)[0]
-            base = os.path.basename(first)
+            first = raw.split("\0", 1)[0].split()[0] if raw.split("\0", 1)[0].strip() else ""
+            base = os.path.basename(first)[:NAME_MAX]
             if base and (base.startswith(comm) or len(comm) >= 15):
                 return base
-        return comm
+        return comm[:NAME_MAX]
 
     # ---- state -------------------------------------------------------
 

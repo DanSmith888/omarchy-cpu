@@ -156,3 +156,26 @@ function pushHistory(history, value, size) {
   while (out.length > cap) out.shift()
   return out
 }
+
+// ---- tooltips -----------------------------------------------------------
+
+function padRight(s, w) {
+  var out = String(s)
+  while (out.length < w) out += " "
+  return out
+}
+
+// Title line, then one aligned "label  value" line per row. Rows whose value
+// is null/empty are dropped, so a machine that doesn't report something
+// simply has no line for it rather than a dash.
+function tooltip(title, rows) {
+  var list = (rows || []).filter(function(r) {
+    return r && r[1] !== null && r[1] !== undefined && r[1] !== "" && r[1] !== "-"
+  })
+  var w = 0
+  for (var i = 0; i < list.length; i++) w = Math.max(w, String(list[i][0]).length)
+  var out = [title]
+  for (var j = 0; j < list.length; j++)
+    out.push(padRight(list[j][0], w) + "   " + String(list[j][1]))
+  return out.join("\n")
+}

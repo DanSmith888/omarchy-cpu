@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "Model.js" as Model
 
 // CPU: the pill in the bar, and the host for the panel.
 //
@@ -19,7 +20,7 @@ BarWidget {
 
   // One source of truth for the mark, so the pill and the width it reserves
   // can never drift apart.
-  readonly property string markGlyph: "󰘚"
+  readonly property string markGlyph: "󰍛"
   // Middle-click lands in btop. -or-focus-tui reuses an existing btop window
   // instead of stacking up terminals.
   readonly property var btopCommand: ["omarchy-launch-or-focus-tui", "btop"]
@@ -44,10 +45,16 @@ BarWidget {
 
   readonly property string tooltip: {
     if (!panel) return "CPU"
-    var bits = [panel.shortModel, "Load " + panel.usageText]
-    if (panel.headlineTemp !== null) bits.push(panel.tempText)
-    if (panel.freqMhz !== null) bits.push(panel.clockText)
-    return bits.join("  ·  ")
+    var top = panel.topProcs && panel.topProcs.length > 0 ? panel.topProcs[0] : null
+    return Model.tooltip(panel.shortModel, [
+      ["Load", panel.usageText],
+      ["Memory", panel.memUsedGiB !== null ? panel.vramLikeMemoryText : ""],
+      ["Temperature", panel.headlineTemp !== null ? panel.tempText : ""],
+      ["Clock", panel.freqMhz !== null ? panel.clockText : ""],
+      ["Load average", panel.loadAvgText],
+      ["Cores", panel.coreSummary],
+      ["Busiest", top ? top.name + "  " + Model.pct1(top.cpu) : ""]
+    ])
   }
 
   // ---- Panel lifecycle contract (shell.summon/hide/toggle routing).
