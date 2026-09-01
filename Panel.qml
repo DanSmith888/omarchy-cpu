@@ -44,6 +44,10 @@ Panel {
   property var packageW: null
   property bool powerPresent: false
   property var powerLimitW: null
+  // Highest measured wattage seen. With real readings this converges on the
+  // chip's actual sustained limit, since that limit is what caps it — so the
+  // bar can scale itself with no PPT entered.
+  property real powerPeakW: 0
   property var memUsedPct: null
   property var memUsedGiB: null
   property var memTotalGiB: null
@@ -104,7 +108,13 @@ Panel {
   readonly property string loadAvgText: root.loadAvg
     ? Model.load(root.loadAvg[0]) + "  " + Model.load(root.loadAvg[1]) + "  " + Model.load(root.loadAvg[2])
     : ""
-  readonly property bool powerEnabled: root.pptWatts > 0
+  // Measured watts need no PPT: scale to the kernel's limit if it reports one
+  // (Intel does, AMD does not), else to the highest reading seen. Only the
+  // load-based estimate needs a PPT, because there is nothing to observe.
+  readonly property bool powerEnabled: root.packageW !== null || root.pptWatts > 0
+  readonly property real powerScale: root.pptWatts > 0
+    ? root.pptWatts
+    : (root.powerLimitW !== null ? root.powerLimitW : root.powerPeakW)
   // Real package watts when the kernel exposes its energy counter; otherwise
   // estimated from load against the TDP you entered.
   readonly property bool powerEstimated: root.packageW === null
@@ -112,7 +122,8 @@ Panel {
     ? root.packageW
     : root.usage / 100 * root.pptWatts
   readonly property string powerText: root.powerEnabled
-    ? (root.powerEstimated ? "≈" : "") + Model.watts(root.powerW) + " / " + Model.watts(root.pptWatts)
+    ? (root.powerEstimated ? "≈" : "") + Model.watts(root.powerW)
+      + (root.powerScale > 0 ? " / " + Model.watts(root.powerScale) : "")
     : ""
   readonly property string coreSummary: root.cores > 0 ? root.cores + " cores / " + root.threads + " threads" : ""
   readonly property string barText: Model.barText([
@@ -223,6 +234,8 @@ Panel {
           root.packageW = (typeof d.packageW === "number") ? d.packageW : null
           root.powerPresent = d.powerPresent === true
           root.powerLimitW = (typeof d.powerLimitW === "number") ? d.powerLimitW : null
+          if (root.packageW !== null && root.packageW > root.powerPeakW)
+            root.powerPeakW = root.packageW
           root.memUsedPct = (typeof d.memUsedPct === "number") ? d.memUsedPct : null
           root.memUsedGiB = (typeof d.memUsedGiB === "number") ? d.memUsedGiB : null
           root.memTotalGiB = (typeof d.memTotalGiB === "number") ? d.memTotalGiB : null
@@ -327,7 +340,7 @@ Panel {
             width: parent.width
             visible: root.powerEnabled
             label: root.powerEstimated ? "Power (estimated)" : "Power"
-            value: root.pptWatts > 0 ? 100 * root.powerW / root.pptWatts : 0
+            value: root.powerScale > 0 ? 100 * root.powerW / root.powerScale : 0
             valueText: root.powerText
             fill: Color.accent
           }
@@ -673,8 +686,8 @@ Panel {
             width: parent.width
             text: root.powerEnabled
               ? (root.powerEstimated
-                  ? "Estimated from load against the PPT below, because this kernel keeps the CPU's energy counter private. Set 0 to hide power."
-                  : "Measured from the CPU's own energy counter, shown against the PPT below. Set 0 to hide power.")
+                  ? "Estimated from load against the PPT below, because this kernel keeps the CPU's energy counter private. A load-based estimate is poor at idle — a chip drawing 45 W doing nothing will read near zero. Set 0 to hide power."
+                  : "Measured from the CPU's own energy counter. The scale is the kernel's reported limit where there is one, otherwise the highest reading seen so far, which settles on the chip's real sustained limit. A PPT below overrides it.")
               : "Enter your CPU's PPT — the sustained package power it is allowed to draw, not its TDP — to show a power reading. Left at 0, power is hidden everywhere."
             color: Qt.darker(root.barForeground, 1.4)
             font.family: Style.font.family
