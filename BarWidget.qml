@@ -137,6 +137,10 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: root.pillText
+    // Tighter than the 8.5 default: the reserved slot already carries a
+    // little slack, and the default margin on top of it left a visibly
+    // wider gap here than between the bar's other widgets.
+    horizontalMargin: 5
     hasVisualContent: text !== ""
     tooltipText: root.tooltip
     // The load bands recolour the whole pill; "" leaves the bar's own colour.
