@@ -77,7 +77,7 @@ entry and apply immediately.
 - Omarchy (Quattro or later)
 - Linux with `/proc` mounted — that's it
 - `btop`, only for the middle-click shortcut
-- CPU power needs one udev rule — see [CPU power](#cpu-power); everything else works out of the box
+
 
 Temperatures come from `k10temp`, `zenpower`, `coretemp`, `cpu_thermal` or
 `acpitz`, whichever is present, with thermal zones as a fallback. Machines
@@ -109,45 +109,14 @@ cpuctl doctor              check every link from /proc to the bar
 
 ## CPU power
 
-The Power reading and its bar are blank until the kernel's energy counter is
-readable. That is not a bug in the plugin: on a stock kernel
-`/sys/class/powercap/intel-rapl:*/energy_uj` is `0400 root:root`.
+Power is off until you enter your CPU's **TDP** in the panel's Power section;
+at 0 it is hidden everywhere. Enter it and you get a power bar and a
+`45 W / 105 W` reading in the hover.
 
-It is locked down deliberately. Power readings are a side channel — the
-PLATYPUS attack (CVE-2020-8694) recovered AES and RSA keys from them — so
-letting every local process read the counter is a real, if narrow, trade. On a
-single-user desktop with no untrusted local accounts it is usually an easy
-call; on a shared or multi-user machine it is not. **Your decision, not the
-plugin's** — nothing here escalates, and you will never be asked for a
-password.
-
-To grant it, scoped to the `wheel` group rather than world-readable:
-
-```bash
-sudo tee /etc/udev/rules.d/99-rapl-readable.rules >/dev/null <<'EOF'
-SUBSYSTEM=="powercap", KERNEL=="intel-rapl:*", \
-  RUN+="/usr/bin/chgrp wheel /sys%p/energy_uj", \
-  RUN+="/usr/bin/chmod g+r /sys%p/energy_uj"
-EOF
-sudo udevadm trigger --subsystem-match=powercap
-```
-
-Check it took:
-
-```bash
-~/.config/omarchy/plugins/dansmith888.cpu/bin/cpuctl doctor | grep -i power
-```
-
-The reading appears on the next poll; no plugin change or restart needed. To
-undo it, delete the rule file and reboot (or `sudo chmod 0400` the counter
-back).
-
-The bar needs something to measure against. Intel's RAPL reports a package
-limit and that is used when present; most AMD machines report none, so the bar
-grows to fit the highest reading seen instead. Set your CPU's TDP under
-**Power** in the panel for a fixed scale. There is deliberately no built-in
-table of TDPs by model name — a table cannot tell a 65 W part from a 105 W one
-sharing a name, or know that you have changed the limit in firmware.
+Where the kernel exposes the CPU's energy counter the figure is measured. Most
+kernels keep that counter private (it is a side channel — see CVE-2020-8694),
+in which case the figure is **estimated** from load against your TDP and is
+labelled as such. The plugin never asks for elevated privileges either way.
 
 ## What runs, and as whom
 

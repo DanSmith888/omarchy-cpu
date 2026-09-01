@@ -44,9 +44,6 @@ Panel {
   property var packageW: null
   property bool powerPresent: false
   property var powerLimitW: null
-  // Highest wattage seen this session — the last-resort scale when neither a
-  // manual setting nor the TDP table gives one.
-  property real powerSeen: 0
   property var memUsedPct: null
   property var memUsedGiB: null
   property var memTotalGiB: null
@@ -73,7 +70,8 @@ Panel {
   readonly property int alertFrom: Model.clampStep(setting("alertFrom", setting("hotFrom", 85)), 5, 100, 5, 85)
   readonly property string warnColor: String(setting("warnColor", setting("busyColor", "")))
   readonly property string alertColor: String(setting("alertColor", setting("hotColor", "")))
-  readonly property int powerScaleW: Model.clampInt(setting("powerScaleW", 0), 0, 1000, 0)
+  // 0 = power is off entirely: no bar, no hover row, no readings.
+  readonly property int tdpWatts: Model.clampInt(setting("tdpWatts", 0), 0, 1000, 0)
   readonly property int pillWidth: Model.clampInt(setting("pillWidth", 0), 0, 400, 0)
   // "total" = share of the whole CPU (all threads at 100% reads 100%).
   // "core"  = share of one core, the top(1) convention.
@@ -96,24 +94,22 @@ Panel {
   readonly property string loadAvgText: root.loadAvg
     ? Model.load(root.loadAvg[0]) + "  " + Model.load(root.loadAvg[1]) + "  " + Model.load(root.loadAvg[2])
     : ""
-  readonly property string powerText: Model.watts(root.packageW)
-  // What the power bar is measured against: an explicit setting first, then
-  // the limit the kernel actually reports (Intel RAPL exposes one, AMD
-  // usually does not), then the highest reading seen this session.
-  readonly property real powerCeiling: powerScaleW > 0
-    ? powerScaleW
-    : (powerLimitW !== null ? powerLimitW : powerSeen)
-  readonly property string powerScaleNote: powerScaleW > 0
-    ? "scaled to " + powerScaleW + " W, set below"
-    : (powerLimitW !== null
-        ? "scaled to the " + powerLimitW + " W limit the kernel reports"
-        : "scaled to the highest reading so far")
+  readonly property bool powerEnabled: root.tdpWatts > 0
+  // Real package watts when the kernel exposes its energy counter; otherwise
+  // estimated from load against the TDP you entered.
+  readonly property bool powerEstimated: root.packageW === null
+  readonly property real powerW: root.packageW !== null
+    ? root.packageW
+    : root.usage / 100 * root.tdpWatts
+  readonly property string powerText: root.powerEnabled
+    ? (root.powerEstimated ? "≈" : "") + Model.watts(root.powerW) + " / " + Model.watts(root.tdpWatts)
+    : ""
   readonly property string coreSummary: root.cores > 0 ? root.cores + " cores / " + root.threads + " threads" : ""
   readonly property string barText: Model.barText([
     root.showUsage ? Model.pct(root.usage) : "",
     root.showTemp && root.headlineTemp !== null ? Model.degreesShort(root.headlineTemp, root.temperatureUnit) : "",
     root.showClock && root.freqMhz !== null ? Model.ghzShort(root.freqMhz) : "",
-    root.showPower && root.packageW !== null ? Model.wattsShort(root.packageW) : ""
+    root.showPower && root.powerEnabled ? Model.wattsShort(root.powerW) : ""
   ])
   // Same shape as barText but with every field at its widest, so the pill
   // can reserve a stable column and stop shuffling its neighbours every
@@ -122,7 +118,7 @@ Panel {
     root.showUsage ? "100%" : "",
     root.showTemp && root.headlineTemp !== null ? "100\u00b0" : "",
     root.showClock && root.freqMhz !== null ? "9.9GHz" : "",
-    root.showPower && root.packageW !== null ? "999W" : ""
+    root.showPower && root.powerEnabled ? "999W" : ""
   ])
   readonly property string tierColor: Model.loadColor(root.usage, root.warnFrom, root.alertFrom,
                                                       root.warnColor, root.alertColor)
@@ -171,7 +167,7 @@ Panel {
   function setAlertFrom(v) { persistSettings({ alertFrom: Model.clampStep(v, 5, 100, 5, 85) }) }
   function setWarnColor(hex) { persistSettings({ warnColor: String(hex) }) }
   function setAlertColor(hex) { persistSettings({ alertColor: String(hex) }) }
-  function setPowerScaleW(v) { persistSettings({ powerScaleW: Model.clampInt(v, 0, 1000, 0) }) }
+  function setTdpWatts(v) { persistSettings({ tdpWatts: Model.clampInt(v, 0, 1000, 0) }) }
   function setProcessScale(v) { persistSettings({ processScale: String(v) === "core" ? "core" : "total" }) }
   function setPillWidth(v) { persistSettings({ pillWidth: Model.clampInt(v, 0, 400, 0) }) }
   function setTopCount(v) { persistSettings({ topCount: Model.clampInt(v, 1, 10, 5) }) }
@@ -217,8 +213,6 @@ Panel {
           root.packageW = (typeof d.packageW === "number") ? d.packageW : null
           root.powerPresent = d.powerPresent === true
           root.powerLimitW = (typeof d.powerLimitW === "number") ? d.powerLimitW : null
-          if (root.packageW !== null && root.packageW > root.powerSeen)
-            root.powerSeen = root.packageW
           root.memUsedPct = (typeof d.memUsedPct === "number") ? d.memUsedPct : null
           root.memUsedGiB = (typeof d.memUsedGiB === "number") ? d.memUsedGiB : null
           root.memTotalGiB = (typeof d.memTotalGiB === "number") ? d.memTotalGiB : null
@@ -321,24 +315,13 @@ Panel {
 
           MeterRow {
             width: parent.width
-            visible: root.packageW !== null
-            label: "Power"
-            // Scale: the setting, else the kernel's reported limit, else
-            // auto-range against the highest reading seen.
-            value: root.powerCeiling > 0 ? 100 * root.packageW / root.powerCeiling : 0
+            visible: root.powerEnabled
+            label: root.powerEstimated ? "Power (estimated)" : "Power"
+            value: root.tdpWatts > 0 ? 100 * root.powerW / root.tdpWatts : 0
             valueText: root.powerText
             fill: Color.accent
           }
 
-          Text {
-            width: parent.width
-            visible: root.powerPresent && root.packageW === null
-            text: "No package power: the kernel keeps the RAPL energy counter root-only. The README's \"CPU power\" section has the one-line fix."
-            color: Qt.darker(root.barForeground, 1.4)
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
-          }
           MeterRow {
             width: parent.width
             visible: root.memUsedPct !== null
@@ -573,9 +556,9 @@ Panel {
 
           Toggle {
             width: parent.width
-            visible: root.packageW !== null
+            visible: root.powerEnabled
             label: "Power"
-            description: "CPU package power in watts."
+            description: "Power against the TDP you set."
             checked: root.showPower
             foreground: root.barForeground
             accent: Color.accent
@@ -659,22 +642,17 @@ Panel {
             onChanged: function(value) { root.setHistorySamples(value) }
           }
 
-          PanelSeparator {
-            width: parent.width
-            foreground: root.barForeground
-            visible: root.packageW !== null
-          }
+          PanelSeparator { width: parent.width; foreground: root.barForeground }
 
-          PanelSectionHeader {
-            text: "POWER"
-            foreground: root.barForeground
-            visible: root.packageW !== null
-          }
+          PanelSectionHeader { text: "POWER"; foreground: root.barForeground }
 
           Text {
             width: parent.width
-            visible: root.packageW !== null
-            text: "Most AMD machines report no package power limit, so the bar grows to fit the highest reading instead. Set your CPU's TDP here for a fixed scale. Currently " + root.powerScaleNote + "."
+            text: root.powerEnabled
+              ? (root.powerEstimated
+                  ? "Estimated from load against the TDP below, because this kernel keeps the CPU's energy counter private. Set 0 to hide power."
+                  : "Measured from the CPU's own energy counter, shown against the TDP below. Set 0 to hide power.")
+              : "Enter your CPU's TDP in watts to show a power reading. Left at 0, power is hidden everywhere."
             color: Qt.darker(root.barForeground, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -683,12 +661,11 @@ Panel {
 
           Row {
             width: parent.width
-            visible: root.packageW !== null
             spacing: Style.space(8)
 
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: "Power scale"
+              text: "TDP"
               color: Qt.darker(root.barForeground, 1.4)
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
@@ -696,19 +673,19 @@ Panel {
 
             NumberField {
               label: ""
-              value: root.powerScaleW
+              value: root.tdpWatts
               from: 0
               to: 1000
               stepSize: 5
               foreground: root.barForeground
               accent: Color.accent
               field.editable: false
-              onModified: function(value) { root.setPowerScaleW(value) }
+              onModified: function(value) { root.setTdpWatts(value) }
             }
 
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: "W  (0 = auto)"
+              text: "W  (0 = off)"
               color: Qt.darker(root.barForeground, 1.4)
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall

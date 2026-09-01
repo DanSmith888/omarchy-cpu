@@ -38,7 +38,8 @@
       "warnColor": "",
       "alertColor": "",
       "topCount": 5,
-      "processScale": "total"
+      "processScale": "total",
+      "tdpWatts": 0
     },
     "schema": [
       {
@@ -144,6 +145,16 @@
         ],
         "defaultValue": "total",
         "description": "total: every thread busy reads 100%. core: the top(1) convention, where one busy thread reads 100%."
+      },
+      {
+        "key": "tdpWatts",
+        "type": "integer",
+        "label": "CPU TDP (watts, 0 = hide power)",
+        "min": 0,
+        "max": 1000,
+        "step": 5,
+        "defaultValue": 0,
+        "description": "Set your CPU's rated TDP to show a power reading. Measured from the kernel's energy counter where readable, otherwise estimated from load."
       }
     ]
   }
