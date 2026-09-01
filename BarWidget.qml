@@ -102,14 +102,25 @@ BarWidget {
     function refresh(): void { root.broadcast("refresh") }
   }
 
-  // Reserving the widest form keeps the pill (and everything beside it in
-  // the bar) still as digits come and go. A reading wider than the reserve
-  // — a fixed unit run past its range — still grows rather than clipping.
+  // Reserving a width keeps the pill — and everything beside it in the bar —
+  // still as digits come and go. Reserving the *theoretical* widest form
+  // ("100% 100°") buys that with a permanent gap of two or three characters,
+  // which is worse than the fidget it fixes. So reserve what the pill has
+  // actually needed: grow to fit, never shrink. In practice it settles within
+  // a few polls at the width of the readings this machine really produces,
+  // and only a genuinely new maximum ever moves it.
+  //
+  // widestPill changes only when the configuration does (a field toggled, a
+  // sensor appearing), which is exactly when the reserve should start over.
+  property real reservedWidth: 0
+  onWidestPillChanged: reservedWidth = 0
+
   TextMetrics {
     id: pillMetrics
     font.family: root.bar ? root.bar.fontFamily : Style.font.family
     font.pixelSize: Style.font.body
-    text: root.widestPill
+    text: root.pillText
+    onWidthChanged: if (width > root.reservedWidth) root.reservedWidth = width
   }
 
   // WidgetButton, not BarIconButton: the latter is glyph-only and clips text.
@@ -125,10 +136,10 @@ BarWidget {
       ? root.tierColor
       : (root.bar ? root.bar.barForeground : Color.foreground)
 
-    // Reserve the widest form; the label stays centred in the slot, so the
-    // pill's neighbours never move as digits come and go.
+    // The label stays centred in the reserved slot. pillMetrics is in the
+    // max so a reading can never be clipped by a stale reserve.
     fixedWidth: pillMetrics.width > 0
-      ? Math.max(pillMetrics.width, labelWidth) + scaledHorizontalMargin * 2
+      ? Math.max(root.reservedWidth, pillMetrics.width, labelWidth) + scaledHorizontalMargin * 2
       : -1
 
     onPressed: function(b) {
