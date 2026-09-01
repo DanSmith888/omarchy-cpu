@@ -39,7 +39,7 @@
       "alertColor": "",
       "topCount": 5,
       "processScale": "total",
-      "tdpWatts": 0
+      "pptWatts": 0
     },
     "schema": [
       {
@@ -147,14 +147,14 @@
         "description": "total: every thread busy reads 100%. core: the top(1) convention, where one busy thread reads 100%."
       },
       {
-        "key": "tdpWatts",
+        "key": "pptWatts",
         "type": "integer",
-        "label": "CPU TDP (watts, 0 = hide power)",
+        "label": "CPU PPT (watts, 0 = hide power)",
         "min": 0,
         "max": 1000,
-        "step": 5,
+        "step": 1,
         "defaultValue": 0,
-        "description": "Set your CPU's rated TDP to show a power reading. Measured from the kernel's energy counter where readable, otherwise estimated from load."
+        "description": "Package Power Tracking: the sustained package power your CPU may draw, which is what the power bar is measured against. Not the TDP \u2014 a Ryzen 9 3900X is 105 W TDP but 142 W PPT."
       }
     ]
   }

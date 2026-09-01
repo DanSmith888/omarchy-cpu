@@ -70,8 +70,13 @@ Panel {
   readonly property int alertFrom: Model.clampStep(setting("alertFrom", setting("hotFrom", 85)), 5, 100, 5, 85)
   readonly property string warnColor: String(setting("warnColor", setting("busyColor", "")))
   readonly property string alertColor: String(setting("alertColor", setting("hotColor", "")))
+  // Package Power Tracking: the sustained package power the chip is allowed
+  // to draw, which is what a power reading should be measured against. It is
+  // not the TDP — a 3900X is 105 W TDP but 142 W PPT — so scaling to TDP
+  // would peg the bar at 100% well before the chip is actually at its limit.
   // 0 = power is off entirely: no bar, no hover row, no readings.
-  readonly property int tdpWatts: Model.clampInt(setting("tdpWatts", 0), 0, 1000, 0)
+  // tdpWatts is the old key, read once so an existing bar entry carries over.
+  readonly property int pptWatts: Model.clampInt(setting("pptWatts", setting("tdpWatts", 0)), 0, 1000, 0)
   readonly property int pillWidth: Model.clampInt(setting("pillWidth", 0), 0, 400, 0)
   // "total" = share of the whole CPU (all threads at 100% reads 100%).
   // "core"  = share of one core, the top(1) convention.
@@ -94,15 +99,15 @@ Panel {
   readonly property string loadAvgText: root.loadAvg
     ? Model.load(root.loadAvg[0]) + "  " + Model.load(root.loadAvg[1]) + "  " + Model.load(root.loadAvg[2])
     : ""
-  readonly property bool powerEnabled: root.tdpWatts > 0
+  readonly property bool powerEnabled: root.pptWatts > 0
   // Real package watts when the kernel exposes its energy counter; otherwise
   // estimated from load against the TDP you entered.
   readonly property bool powerEstimated: root.packageW === null
   readonly property real powerW: root.packageW !== null
     ? root.packageW
-    : root.usage / 100 * root.tdpWatts
+    : root.usage / 100 * root.pptWatts
   readonly property string powerText: root.powerEnabled
-    ? (root.powerEstimated ? "≈" : "") + Model.watts(root.powerW) + " / " + Model.watts(root.tdpWatts)
+    ? (root.powerEstimated ? "≈" : "") + Model.watts(root.powerW) + " / " + Model.watts(root.pptWatts)
     : ""
   readonly property string coreSummary: root.cores > 0 ? root.cores + " cores / " + root.threads + " threads" : ""
   readonly property string barText: Model.barText([
@@ -167,7 +172,7 @@ Panel {
   function setAlertFrom(v) { persistSettings({ alertFrom: Model.clampStep(v, 5, 100, 5, 85) }) }
   function setWarnColor(hex) { persistSettings({ warnColor: String(hex) }) }
   function setAlertColor(hex) { persistSettings({ alertColor: String(hex) }) }
-  function setTdpWatts(v) { persistSettings({ tdpWatts: Model.clampInt(v, 0, 1000, 0) }) }
+  function setPptWatts(v) { persistSettings({ pptWatts: Model.clampInt(v, 0, 1000, 0) }) }
   function setProcessScale(v) { persistSettings({ processScale: String(v) === "core" ? "core" : "total" }) }
   function setPillWidth(v) { persistSettings({ pillWidth: Model.clampInt(v, 0, 400, 0) }) }
   function setTopCount(v) { persistSettings({ topCount: Model.clampInt(v, 1, 10, 5) }) }
@@ -317,7 +322,7 @@ Panel {
             width: parent.width
             visible: root.powerEnabled
             label: root.powerEstimated ? "Power (estimated)" : "Power"
-            value: root.tdpWatts > 0 ? 100 * root.powerW / root.tdpWatts : 0
+            value: root.pptWatts > 0 ? 100 * root.powerW / root.pptWatts : 0
             valueText: root.powerText
             fill: Color.accent
           }
@@ -448,16 +453,6 @@ Panel {
 
           // ---------- Top processes ----------
           PanelSectionHeader { text: "TOP PROCESSES"; foreground: root.barForeground }
-
-          ButtonGroup {
-            value: root.processScale
-            options: root.processScaleChips
-            foreground: root.barForeground
-            background: Color.background
-            accent: Color.accent
-            fontFamily: Style.font.family
-            onChanged: function(value) { root.setProcessScale(value) }
-          }
 
           Text {
             width: parent.width
@@ -644,15 +639,38 @@ Panel {
 
           PanelSeparator { width: parent.width; foreground: root.barForeground }
 
+          PanelSectionHeader { text: "PROCESS LIST"; foreground: root.barForeground }
+
+          Text {
+            width: parent.width
+            text: "How each process's share is measured. All cores counts the whole chip, so everything running flat out adds up to 100% — one thread pinned on a 24-thread machine is about 4%. One core is what top and htop show: that same thread reads 100%, and a busy four-thread job reads 400%."
+            color: Qt.darker(root.barForeground, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          ButtonGroup {
+            value: root.processScale
+            options: root.processScaleChips
+            foreground: root.barForeground
+            background: Color.background
+            accent: Color.accent
+            fontFamily: Style.font.family
+            onChanged: function(value) { root.setProcessScale(value) }
+          }
+
+          PanelSeparator { width: parent.width; foreground: root.barForeground }
+
           PanelSectionHeader { text: "POWER"; foreground: root.barForeground }
 
           Text {
             width: parent.width
             text: root.powerEnabled
               ? (root.powerEstimated
-                  ? "Estimated from load against the TDP below, because this kernel keeps the CPU's energy counter private. Set 0 to hide power."
-                  : "Measured from the CPU's own energy counter, shown against the TDP below. Set 0 to hide power.")
-              : "Enter your CPU's TDP in watts to show a power reading. Left at 0, power is hidden everywhere."
+                  ? "Estimated from load against the PPT below, because this kernel keeps the CPU's energy counter private. Set 0 to hide power."
+                  : "Measured from the CPU's own energy counter, shown against the PPT below. Set 0 to hide power.")
+              : "Enter your CPU's PPT — the sustained package power it is allowed to draw, not its TDP — to show a power reading. Left at 0, power is hidden everywhere."
             color: Qt.darker(root.barForeground, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -665,7 +683,7 @@ Panel {
 
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: "TDP"
+              text: "PPT"
               color: Qt.darker(root.barForeground, 1.4)
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall
@@ -673,14 +691,14 @@ Panel {
 
             NumberField {
               label: ""
-              value: root.tdpWatts
+              value: root.pptWatts
               from: 0
               to: 1000
-              stepSize: 5
+              stepSize: 1
               foreground: root.barForeground
               accent: Color.accent
               field.editable: false
-              onModified: function(value) { root.setTdpWatts(value) }
+              onModified: function(value) { root.setPptWatts(value) }
             }
 
             Text {

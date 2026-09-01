@@ -109,13 +109,18 @@ cpuctl doctor              check every link from /proc to the bar
 
 ## CPU power
 
-Power is off until you enter your CPU's **TDP** in the panel's Power section;
+Power is off until you enter your CPU's **PPT** in the panel's Power section;
 at 0 it is hidden everywhere. Enter it and you get a power bar and a
-`45 W / 105 W` reading in the hover.
+`45 W / 142 W` reading in the hover.
+
+PPT — Package Power Tracking — is the sustained package power the chip is
+allowed to draw, and is the number the bar should be measured against. It is
+not the TDP: a Ryzen 9 3900X is 105 W TDP but 142 W PPT, so scaling to TDP
+would show the bar pegged well before the chip is at its limit.
 
 Where the kernel exposes the CPU's energy counter the figure is measured. Most
 kernels keep that counter private (it is a side channel — see CVE-2020-8694),
-in which case the figure is **estimated** from load against your TDP and is
+in which case the figure is **estimated** from load against your PPT and is
 labelled as such. The plugin never asks for elevated privileges either way.
 
 ## What runs, and as whom
