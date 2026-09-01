@@ -26,6 +26,24 @@ Panel {
   }
 
   readonly property string pluginDir: Qt.resolvedUrl(".").toString().replace("file://", "")
+  readonly property string themeColorsPath: (Quickshell.env("HOME") || "")
+    + "/.local/state/omarchy/current/theme/colors.toml"
+
+  // A stalled command must not wedge polling. Each Process gets a deadline;
+  // if it is still running when the timer fires, it is killed and the next
+  // poll starts clean. bin/cpustatus reads /proc directly and never shells
+  // out, so its own output is bounded by the caps in the backend.
+  property int watchdogSeconds: 10
+  Timer {
+    id: watchdog
+    interval: root.watchdogSeconds * 1000
+    repeat: true
+    running: true
+    onTriggered: {
+      if (statusProc.running) statusProc.running = false
+      if (themeProc.running) themeProc.running = false
+    }
+  }
 
   // ---- Readings. null means "this machine doesn't report it" and hides
   // the control rather than showing a made-up zero.
@@ -235,7 +253,10 @@ Panel {
 
   Process {
     id: themeProc
-    command: ["bash", "-lc", "cat ~/.local/state/omarchy/current/theme/colors.toml 2>/dev/null"]
+    // No shell, no tilde expansion, no glob: an explicit absolute path built
+    // from $HOME, read through head so the size is capped whatever the path
+    // turns out to point at.
+    command: ["head", "-c", "65536", root.themeColorsPath]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: root.themeColors = Model.parseThemeColors(text)
