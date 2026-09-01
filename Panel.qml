@@ -41,6 +41,7 @@ Panel {
   property var temps: []
   property string sensor: ""
   property var loadAvg: null
+  property var packageW: null
   property var memUsedPct: null
   property var memUsedGiB: null
   property var memTotalGiB: null
@@ -57,6 +58,7 @@ Panel {
   readonly property bool showUsage: Model.asBool(setting("showUsage", true), true)
   readonly property bool showTemp: Model.asBool(setting("showTemp", true), true)
   readonly property bool showClock: Model.asBool(setting("showClock", false), false)
+  readonly property bool showPower: Model.asBool(setting("showPower", false), false)
   readonly property bool showIcon: Model.asBool(setting("showIcon", true), true)
   readonly property string tempSensor: String(setting("tempSensor", "auto"))
   // warnFrom/alertFrom were once busyFrom/hotFrom: read the old key as the
@@ -80,11 +82,13 @@ Panel {
   readonly property string loadAvgText: root.loadAvg
     ? Model.load(root.loadAvg[0]) + "  " + Model.load(root.loadAvg[1]) + "  " + Model.load(root.loadAvg[2])
     : ""
+  readonly property string powerText: Model.watts(root.packageW)
   readonly property string coreSummary: root.cores > 0 ? root.cores + " cores / " + root.threads + " threads" : ""
   readonly property string barText: Model.barText([
     root.showUsage ? Model.pct(root.usage) : "",
     root.showTemp && root.headlineTemp !== null ? Model.degreesShort(root.headlineTemp, root.temperatureUnit) : "",
-    root.showClock && root.freqMhz !== null ? Model.ghzShort(root.freqMhz) : ""
+    root.showClock && root.freqMhz !== null ? Model.ghzShort(root.freqMhz) : "",
+    root.showPower && root.packageW !== null ? Model.wattsShort(root.packageW) : ""
   ])
   // Same shape as barText but with every field at its widest, so the pill
   // can reserve a stable column and stop shuffling its neighbours every
@@ -92,7 +96,8 @@ Panel {
   readonly property string barWidest: Model.barText([
     root.showUsage ? "100%" : "",
     root.showTemp && root.headlineTemp !== null ? "100\u00b0" : "",
-    root.showClock && root.freqMhz !== null ? "9.9GHz" : ""
+    root.showClock && root.freqMhz !== null ? "9.9GHz" : "",
+    root.showPower && root.packageW !== null ? "999W" : ""
   ])
   readonly property string tierColor: Model.loadColor(root.usage, root.warnFrom, root.alertFrom,
                                                       root.warnColor, root.alertColor)
@@ -133,6 +138,7 @@ Panel {
   function setShowUsage(v) { persistSettings({ showUsage: !!v }) }
   function setShowTemp(v) { persistSettings({ showTemp: !!v }) }
   function setShowClock(v) { persistSettings({ showClock: !!v }) }
+  function setShowPower(v) { persistSettings({ showPower: !!v }) }
   function setShowIcon(v) { persistSettings({ showIcon: !!v }) }
   function setTempSensor(v) { persistSettings({ tempSensor: String(v || "auto") }) }
   function setWarnFrom(v) { persistSettings({ warnFrom: Model.clampStep(v, 5, 100, 5, 50) }) }
@@ -179,6 +185,7 @@ Panel {
           root.temps = d.temps || []
           root.sensor = d.sensor || ""
           root.loadAvg = d.load || null
+          root.packageW = (typeof d.packageW === "number") ? d.packageW : null
           root.memUsedPct = (typeof d.memUsedPct === "number") ? d.memUsedPct : null
           root.memUsedGiB = (typeof d.memUsedGiB === "number") ? d.memUsedGiB : null
           root.memTotalGiB = (typeof d.memTotalGiB === "number") ? d.memTotalGiB : null
@@ -295,6 +302,15 @@ Panel {
               ? "Load average  " + Model.load(root.loadAvg[0]) + "   " + Model.load(root.loadAvg[1])
                 + "   " + Model.load(root.loadAvg[2])
               : ""
+            color: Qt.darker(root.barForeground, 1.4)
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Text {
+            width: parent.width
+            visible: root.packageW !== null
+            text: "Package power  " + root.powerText
             color: Qt.darker(root.barForeground, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -498,6 +514,18 @@ Panel {
             accent: Color.accent
             fontFamily: Style.font.family
             onClicked: root.setShowClock(!root.showClock)
+          }
+
+          Toggle {
+            width: parent.width
+            visible: root.packageW !== null
+            label: "Power"
+            description: "CPU package power in watts."
+            checked: root.showPower
+            foreground: root.barForeground
+            accent: Color.accent
+            fontFamily: Style.font.family
+            onClicked: root.setShowPower(!root.showPower)
           }
 
           Text {

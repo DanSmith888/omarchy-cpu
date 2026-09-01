@@ -51,6 +51,7 @@ BarWidget {
       ["Memory", panel.memUsedGiB !== null ? panel.vramLikeMemoryText : ""],
       ["Temperature", panel.headlineTemp !== null ? panel.tempText : ""],
       ["Clock", panel.freqMhz !== null ? panel.clockText : ""],
+      ["Power", panel.packageW !== null ? panel.powerText : ""],
       ["Load average", panel.loadAvgText],
       ["Cores", panel.coreSummary],
       ["Busiest", top ? top.name + "  " + Model.pct1(top.cpu) : ""]

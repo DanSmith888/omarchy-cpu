@@ -40,6 +40,12 @@ TOP_DEFAULT = 5
 # not a name.
 NAME_MAX = 24
 
+# Package-level RAPL energy domains. The counter is 0400 root:root on a stock
+# kernel — the mitigation for PLATYPUS (CVE-2020-8694) — so this is normally
+# unreadable and every power reading comes back None. Grant read access and it
+# starts working with no other change.
+RAPL_GLOB = "/sys/class/powercap/intel-rapl:[0-9]*"
+
 # hwmon drivers that report the CPU, best first.
 CPU_HWMON = ("k10temp", "zenpower", "coretemp", "cpu_thermal", "soc_thermal", "acpitz")
 # Preferred temperature labels, best first (Tctl is what AMD throttles on).
@@ -62,6 +68,45 @@ def read_int(path):
         return int(raw.strip())
     except ValueError:
         return None
+
+
+def rapl_domains():
+    """Package energy domains: [(energy_uj path, wrap-around maximum)]."""
+    out = []
+    for d in sorted(glob.glob(RAPL_GLOB)):
+        name = (read(os.path.join(d, "name")) or "").strip()
+        if not name.startswith("package"):
+            continue
+        out.append((os.path.join(d, "energy_uj"),
+                    read_int(os.path.join(d, "max_energy_range_uj"))))
+    return out
+
+
+def rapl_energy_uj():
+    """Total package energy in microjoules, or None when it can't be read.
+
+    None is the normal answer on a stock kernel: the counter is root-only.
+    """
+    domains = rapl_domains()
+    if not domains:
+        return None
+    total = 0
+    for path, _ in domains:
+        v = read_int(path)
+        if v is None:
+            return None
+        total += v
+    return total
+
+
+def rapl_wrap_uj():
+    """Sum of the domains' wrap points, for the rare counter rollover."""
+    total = 0
+    for _, mx in rapl_domains():
+        if not mx:
+            return None
+        total += mx
+    return total
 
 
 class Sampler:
@@ -192,16 +237,19 @@ class Sampler:
         if stat is None:
             return None
         procs = self.read_procs()
+        energy = rapl_energy_uj()
         now = time.time()
 
         if prev is None or prev.get("total", [0, 0])[1] > stat["total"][1]:
             # No baseline (first run, or counters went backwards after a
             # reboot): take a short second sample so we still return rates.
             prev = {"ts": now, "total": stat["total"], "cores": stat["cores"],
-                    "procs": {str(p): v[0] for p, v in procs.items()}}
+                    "procs": {str(p): v[0] for p, v in procs.items()},
+                    "energy": energy}
             time.sleep(FIRST_SAMPLE_GAP)
             stat = self.read_stat() or stat
             procs = self.read_procs() or procs
+            energy = rapl_energy_uj()
             now = time.time()
 
         def pct(cur, old):
@@ -234,14 +282,31 @@ class Sampler:
         top_list = [{"pid": pid, "name": self.nice_name(pid, comm), "cpu": round(share, 1)}
                     for share, pid, comm in top[:top_n]]
 
+        # Package watts = energy burned between the two samples / elapsed time.
+        elapsed = now - float(prev["ts"])
+        watts = None
+        prev_energy = prev.get("energy")
+        if energy is not None and prev_energy is not None and elapsed > 0:
+            delta = energy - prev_energy
+            if delta < 0:                      # counter wrapped
+                wrap = rapl_wrap_uj()
+                delta = delta + wrap if wrap else None
+            if delta is not None and delta >= 0:
+                w = delta / 1e6 / elapsed
+                # A implausible figure means the counter moved for a reason
+                # other than elapsed time; report nothing rather than nonsense.
+                watts = round(w, 1) if 0 <= w < 1000 else None
+
         self.save_state({"ts": now, "total": stat["total"], "cores": stat["cores"],
-                         "procs": {str(p): v[0] for p, v in procs.items()}})
+                         "procs": {str(p): v[0] for p, v in procs.items()},
+                         "energy": energy})
 
         return {
             "usage": round(usage, 1),
             "perCore": [round(v) for v in per_core],
             "top": top_list,
-            "sampleSec": round(now - float(prev["ts"]), 2),
+            "packageW": watts,
+            "sampleSec": round(elapsed, 2),
         }
 
 
@@ -402,6 +467,13 @@ def doctor():
     add(True, "CPU temperature",
         f"{temps['sensor']}: " + ", ".join(f"{t['label']} {t['c']}°C" for t in temps["temps"])
         if temps["temps"] else "no CPU hwmon found; temperature hidden in the panel")
+    energy = rapl_energy_uj()
+    add(True, "CPU package power",
+        "readable" if energy is not None else
+        "counter is root-only (PLATYPUS mitigation); power hidden in the panel",
+        "" if energy is not None else
+        "grant read access to /sys/class/powercap/intel-rapl:*/energy_uj")
+
     try:
         os.makedirs(_RUNTIME_DIR, exist_ok=True)
         with open(os.path.join(_RUNTIME_DIR, PLUGIN_ID + ".probe"), "w") as f:
@@ -471,6 +543,8 @@ def print_human(state):
         print("  temp    " + "  ".join(f"{t['label']} {t['c']}°C" for t in state["temps"]))
     if state["load"]:
         print("  load    " + "  ".join(f"{v:.2f}" for v in state["load"]))
+    if state["packageW"] is not None:
+        print(f"  power   {state['packageW']} W  (package)")
     if state["memUsedPct"] is not None:
         print(f"  memory  {state['memUsedGiB']} / {state['memTotalGiB']} GiB ({state['memUsedPct']}%)")
     if state["top"]:

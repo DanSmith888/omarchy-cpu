@@ -29,6 +29,7 @@
       "showUsage": true,
       "showTemp": true,
       "showClock": false,
+      "showPower": false,
       "tempSensor": "auto",
       "temperatureUnit": "C",
       "historySamples": 60,
@@ -71,6 +72,13 @@
         "type": "boolean",
         "label": "Show clock in the bar",
         "defaultValue": false
+      },
+      {
+        "key": "showPower",
+        "type": "boolean",
+        "label": "Show CPU package power in the bar",
+        "defaultValue": false,
+        "description": "Needs read access to /sys/class/powercap/intel-rapl:*/energy_uj; hidden when the kernel keeps it root-only."
       },
       {
         "key": "tempSensor",
