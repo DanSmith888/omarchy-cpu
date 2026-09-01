@@ -75,6 +75,13 @@ Panel {
   readonly property string alertColor: String(setting("alertColor", setting("hotColor", "")))
   readonly property int powerScaleW: Model.clampInt(setting("powerScaleW", 0), 0, 1000, 0)
   readonly property int pillWidth: Model.clampInt(setting("pillWidth", 0), 0, 400, 0)
+  // "total" = share of the whole CPU (all threads at 100% reads 100%).
+  // "core"  = share of one core, the top(1) convention.
+  readonly property string processScale: setting("processScale", "total") === "core" ? "core" : "total"
+  readonly property var processScaleChips: [
+    { value: "total", label: "All cores", tooltip: "Every thread busy reads 100%" },
+    { value: "core", label: "One core", tooltip: "The top(1) convention: one busy thread reads 100%" }
+  ]
   readonly property int topCount: Model.clampInt(setting("topCount", 5), 1, 10, 5)
   readonly property string temperatureUnit: Model.normalizeUnit(setting("temperatureUnit", "C"))
   readonly property int historySamples: Model.clampInt(setting("historySamples", 60), 20, 240, 60)
@@ -165,6 +172,7 @@ Panel {
   function setWarnColor(hex) { persistSettings({ warnColor: String(hex) }) }
   function setAlertColor(hex) { persistSettings({ alertColor: String(hex) }) }
   function setPowerScaleW(v) { persistSettings({ powerScaleW: Model.clampInt(v, 0, 1000, 0) }) }
+  function setProcessScale(v) { persistSettings({ processScale: String(v) === "core" ? "core" : "total" }) }
   function setPillWidth(v) { persistSettings({ pillWidth: Model.clampInt(v, 0, 400, 0) }) }
   function setTopCount(v) { persistSettings({ topCount: Model.clampInt(v, 1, 10, 5) }) }
   function setTemperatureUnit(v) { persistSettings({ temperatureUnit: Model.normalizeUnit(v) }) }
@@ -458,6 +466,16 @@ Panel {
           // ---------- Top processes ----------
           PanelSectionHeader { text: "TOP PROCESSES"; foreground: root.barForeground }
 
+          ButtonGroup {
+            value: root.processScale
+            options: root.processScaleChips
+            foreground: root.barForeground
+            background: Color.background
+            accent: Color.accent
+            fontFamily: Style.font.family
+            onChanged: function(value) { root.setProcessScale(value) }
+          }
+
           Text {
             width: parent.width
             visible: root.topProcs.length === 0
@@ -485,7 +503,7 @@ Panel {
 
               Text {
                 id: procValue
-                text: Model.pct1(modelData.cpu)
+                text: Model.pctSmall(Model.processPct(modelData.cpu, root.threads, root.processScale))
                 color: root.barForeground
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall

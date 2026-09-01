@@ -72,6 +72,14 @@ function toUnit(c, unit) {
 }
 function unitSuffix(unit) { return unit === "F" ? "°F" : "°C" }
 function normalizeUnit(unit) { return String(unit) === "F" ? "F" : "C" }
+// A process that is running should never render as 0.0%: with the all-cores
+// scale on a many-threaded machine, real work rounds to nothing.
+function pctSmall(v) {
+  if (!isNum(v)) return "–"
+  if (v > 0 && v < 0.05) return "<0.1%"
+  return v.toFixed(1) + "%"
+}
+
 function pct1(v) { return isNum(v) ? v.toFixed(1) + "%" : "–" }
 function degrees(v, unit) {
   var t = toUnit(v, unit)
@@ -109,6 +117,17 @@ function barText(parts) {
   var out = []
   for (var i = 0; i < parts.length; i++) if (parts[i]) out.push(parts[i])
   return out.join(" ")
+}
+
+// Per-process CPU share. The backend reports the top(1) convention — percent
+// of one core, so a busy 24-thread box can read 2400% — because that is what
+// /proc/<pid>/stat deltas actually measure. "total" divides by the thread
+// count so the whole machine at full tilt reads 100%.
+function processPct(cpu, threads, scale) {
+  if (!isNum(cpu)) return null
+  if (scale === "core") return cpu
+  var n = Math.max(1, Math.round(num(threads, 1)))
+  return cpu / n
 }
 
 // ---- colours ------------------------------------------------------------

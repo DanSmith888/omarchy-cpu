@@ -96,8 +96,11 @@ cpuctl doctor              check every link from /proc to the bar
 
 - Load is a delta between two samples. The first reading after a boot or a
   long gap takes a 0.25 s second sample so it still means something.
-- Process percentages are shares of **one** core, so a busy 4-thread job
-  can read 400%, the same way `top` reports it.
+- Process percentages default to a share of the **whole** CPU, so everything
+  running flat out adds up to 100%. Switch to **One core** under Top
+  processes for the `top(1)` convention, where a busy 4-thread job reads
+  400%. `cpuctl top` on the command line always reports the one-core figure,
+  since that is what the `/proc` deltas measure.
 - Used memory follows `MemAvailable`, so reclaimable cache is not counted.
 - The pill reserves the width of its widest reading (`100% 100° 9.9GHz`),
   so nothing in the bar shifts as digits come and go.

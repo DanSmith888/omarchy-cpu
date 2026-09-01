@@ -37,7 +37,8 @@
       "alertFrom": 85,
       "warnColor": "",
       "alertColor": "",
-      "topCount": 5
+      "topCount": 5,
+      "processScale": "total"
     },
     "schema": [
       {
@@ -91,7 +92,10 @@
         "key": "temperatureUnit",
         "type": "enum",
         "label": "Temperature unit",
-        "options": ["C", "F"],
+        "options": [
+          "C",
+          "F"
+        ],
         "defaultValue": "C"
       },
       {
@@ -129,6 +133,17 @@
         "max": 10,
         "step": 1,
         "defaultValue": 5
+      },
+      {
+        "key": "processScale",
+        "type": "enum",
+        "label": "Process CPU shown as",
+        "options": [
+          "total",
+          "core"
+        ],
+        "defaultValue": "total",
+        "description": "total: every thread busy reads 100%. core: the top(1) convention, where one busy thread reads 100%."
       }
     ]
   }
