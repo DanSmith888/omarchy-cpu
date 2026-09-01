@@ -44,10 +44,6 @@ Panel {
   property var packageW: null
   property bool powerPresent: false
   property var powerLimitW: null
-  // Highest measured wattage seen. With real readings this converges on the
-  // chip's actual sustained limit, since that limit is what caps it — so the
-  // bar can scale itself with no PPT entered.
-  property real powerPeakW: 0
   property var memUsedPct: null
   property var memUsedGiB: null
   property var memTotalGiB: null
@@ -85,15 +81,21 @@ Panel {
   // "total" = share of the whole CPU (all threads at 100% reads 100%).
   // "core"  = share of one core, the top(1) convention.
   readonly property string processScale: setting("processScale", "total") === "core" ? "core" : "total"
-  // Labels say what the scale tops out at, because "all cores" reads both
-  // ways: as a share OF all the cores (100%) or as a count ACROSS them
-  // (2400% on this machine). The number removes the ambiguity.
-  readonly property var processScaleChips: [
-    { value: "total", label: "Whole CPU · 100%",
-      tooltip: "Every process's share of the entire chip. Everything running flat out adds up to 100%." },
-    { value: "core", label: "Per core · " + (root.threads > 0 ? root.threads * 100 : 100) + "%",
-      tooltip: "What top and htop show: one fully busy thread reads 100%, so this machine totals " + (root.threads > 0 ? root.threads * 100 : 100) + "%." }
-  ]
+  // Rebuilt whenever the thread count changes rather than bound inline: the
+  // label is evaluated before the first poll lands, and a stale binding left
+  // "Per core" reading 100% instead of the machine's real maximum.
+  property var processScaleChips: []
+  readonly property int perCoreMax: root.threads > 0 ? root.threads * 100 : 100
+  function rebuildProcessScaleChips() {
+    root.processScaleChips = [
+      { value: "total", label: "Whole CPU · 100%",
+        tooltip: "Every process's share of the entire chip. Everything running flat out adds up to 100%." },
+      { value: "core", label: "Per core · " + root.perCoreMax + "%",
+        tooltip: "What top and htop show: one fully busy thread reads 100%, so this machine totals " + root.perCoreMax + "%." }
+    ]
+  }
+  onPerCoreMaxChanged: rebuildProcessScaleChips()
+
   readonly property int topCount: Model.clampInt(setting("topCount", 5), 1, 10, 5)
   readonly property string temperatureUnit: Model.normalizeUnit(setting("temperatureUnit", "C"))
   readonly property int historySamples: Model.clampInt(setting("historySamples", 60), 20, 240, 60)
@@ -108,23 +110,22 @@ Panel {
   readonly property string loadAvgText: root.loadAvg
     ? Model.load(root.loadAvg[0]) + "  " + Model.load(root.loadAvg[1]) + "  " + Model.load(root.loadAvg[2])
     : ""
-  // Measured watts need no PPT: scale to the kernel's limit if it reports one
-  // (Intel does, AMD does not), else to the highest reading seen. Only the
-  // load-based estimate needs a PPT, because there is nothing to observe.
-  readonly property bool powerEnabled: root.packageW !== null || root.pptWatts > 0
+  // Power is shown only when the CPU's energy counter is actually readable.
+  // No counter, no power: a load-based estimate was wrong by ~10x at idle
+  // (a chip drawing 45 W doing nothing reads near zero), so there is none.
+  readonly property bool powerEnabled: root.packageW !== null
+  // PPT is optional and only AMD needs it: Intel's RAPL reports its own
+  // limit, AMD's reports none. Without it the reading stands on its own.
   readonly property real powerScale: root.pptWatts > 0
     ? root.pptWatts
-    : (root.powerLimitW !== null ? root.powerLimitW : root.powerPeakW)
-  // Real package watts when the kernel exposes its energy counter; otherwise
-  // estimated from load against the TDP you entered.
-  readonly property bool powerEstimated: root.packageW === null
-  readonly property real powerW: root.packageW !== null
-    ? root.packageW
-    : root.usage / 100 * root.pptWatts
-  readonly property string powerText: root.powerEnabled
-    ? (root.powerEstimated ? "≈" : "") + Model.watts(root.powerW)
-      + (root.powerScale > 0 ? " / " + Model.watts(root.powerScale) : "")
-    : ""
+    : (root.powerLimitW !== null ? root.powerLimitW : 0)
+  readonly property bool powerHasScale: root.powerEnabled && root.powerScale > 0
+  readonly property real powerW: root.packageW !== null ? root.packageW : 0
+  readonly property string powerText: !root.powerEnabled
+    ? ""
+    : (root.powerHasScale
+        ? Model.watts(root.powerW) + " / " + Model.watts(root.powerScale)
+        : Model.watts(root.powerW))
   readonly property string coreSummary: root.cores > 0 ? root.cores + " cores / " + root.threads + " threads" : ""
   readonly property string barText: Model.barText([
     root.showUsage ? Model.pct(root.usage) : "",
@@ -206,7 +207,10 @@ Panel {
     refreshThemeColors()
     flick.contentY = 0
   }
-  Component.onCompleted: refreshThemeColors()
+  Component.onCompleted: {
+    refreshThemeColors()
+    rebuildProcessScaleChips()
+  }
 
   Process {
     id: statusProc
@@ -234,8 +238,6 @@ Panel {
           root.packageW = (typeof d.packageW === "number") ? d.packageW : null
           root.powerPresent = d.powerPresent === true
           root.powerLimitW = (typeof d.powerLimitW === "number") ? d.powerLimitW : null
-          if (root.packageW !== null && root.packageW > root.powerPeakW)
-            root.powerPeakW = root.packageW
           root.memUsedPct = (typeof d.memUsedPct === "number") ? d.memUsedPct : null
           root.memUsedGiB = (typeof d.memUsedGiB === "number") ? d.memUsedGiB : null
           root.memTotalGiB = (typeof d.memTotalGiB === "number") ? d.memTotalGiB : null
@@ -338,11 +340,37 @@ Panel {
 
           MeterRow {
             width: parent.width
-            visible: root.powerEnabled
-            label: root.powerEstimated ? "Power (estimated)" : "Power"
+            visible: root.powerHasScale
+            label: "Power"
             value: root.powerScale > 0 ? 100 * root.powerW / root.powerScale : 0
             valueText: root.powerText
             fill: Color.accent
+          }
+
+          // No limit to measure against — AMD reports none — so the reading
+          // stands on its own rather than inventing a bar.
+          Row {
+            width: parent.width
+            visible: root.powerEnabled && !root.powerHasScale
+            spacing: Style.space(8)
+
+            Text {
+              width: parent.width - powerOnly.width - parent.spacing
+              text: "Power"
+              color: Qt.darker(root.barForeground, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+            }
+
+            Text {
+              id: powerOnly
+              text: root.powerText
+              color: root.barForeground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
+            }
           }
 
           MeterRow {
@@ -657,7 +685,7 @@ Panel {
 
           PanelSeparator { width: parent.width; foreground: root.barForeground }
 
-          PanelSectionHeader { text: "PROCESS LIST"; foreground: root.barForeground }
+          PanelSectionHeader { text: "PROCESS CPU SCALE"; foreground: root.barForeground }
 
           Text {
             width: parent.width
@@ -678,17 +706,24 @@ Panel {
             onChanged: function(value) { root.setProcessScale(value) }
           }
 
-          PanelSeparator { width: parent.width; foreground: root.barForeground }
+          PanelSeparator {
+            width: parent.width
+            foreground: root.barForeground
+            visible: root.powerEnabled
+          }
 
-          PanelSectionHeader { text: "POWER"; foreground: root.barForeground }
+          PanelSectionHeader {
+            text: "POWER"
+            foreground: root.barForeground
+            visible: root.powerEnabled
+          }
 
           Text {
             width: parent.width
-            text: root.powerEnabled
-              ? (root.powerEstimated
-                  ? "Estimated from load against the PPT below, because this kernel keeps the CPU's energy counter private. A load-based estimate is poor at idle — a chip drawing 45 W doing nothing will read near zero. Set 0 to hide power."
-                  : "Measured from the CPU's own energy counter. The scale is the kernel's reported limit where there is one, otherwise the highest reading seen so far, which settles on the chip's real sustained limit. A PPT below overrides it.")
-              : "Enter your CPU's PPT — the sustained package power it is allowed to draw, not its TDP — to show a power reading. Left at 0, power is hidden everywhere."
+            visible: root.powerEnabled
+            text: root.powerHasScale
+              ? "Measured from the CPU's energy counter, against the limit below."
+              : "Measured from the CPU's energy counter. AMD reports no power limit, so there is nothing to measure it against — enter your CPU's PPT below for a bar and a total, or leave it at 0 to just show the wattage."
             color: Qt.darker(root.barForeground, 1.4)
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
@@ -697,6 +732,7 @@ Panel {
 
           Row {
             width: parent.width
+            visible: root.powerEnabled
             spacing: Style.space(8)
 
             Text {
@@ -721,7 +757,7 @@ Panel {
 
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: "W  (0 = off)"
+              text: "W  (0 = no total)"
               color: Qt.darker(root.barForeground, 1.4)
               font.family: Style.font.family
               font.pixelSize: Style.font.bodySmall

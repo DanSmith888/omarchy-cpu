@@ -110,19 +110,58 @@ cpuctl doctor              check every link from /proc to the bar
 
 ## CPU power
 
-Power is off until you enter your CPU's **PPT** in the panel's Power section;
-at 0 it is hidden everywhere. Enter it and you get a power bar and a
-`45 W / 142 W` reading in the hover.
+**Entirely optional.** Out of the box there is no power display at all — no
+bar, no hover row, nothing in the pill. The plugin never asks for elevated
+privileges and works fully without this.
 
-PPT — Package Power Tracking — is the sustained package power the chip is
-allowed to draw, and is the number the bar should be measured against. It is
-not the TDP: a Ryzen 9 3900X is 105 W TDP but 142 W PPT, so scaling to TDP
-would show the bar pegged well before the chip is at its limit.
+Power comes from the CPU's own energy counter,
+`/sys/class/powercap/intel-rapl:*/energy_uj`, which most kernels ship as
+`0400 root:root`. Without read access there is nothing to measure, so the
+plugin shows nothing rather than guessing — a load-based estimate is wrong by
+roughly ten times at idle, since a chip drawing 45 W doing nothing would read
+near zero.
 
-Where the kernel exposes the CPU's energy counter the figure is measured. Most
-kernels keep that counter private (it is a side channel — see CVE-2020-8694),
-in which case the figure is **estimated** from load against your PPT and is
-labelled as such. The plugin never asks for elevated privileges either way.
+`btop` solves this by shipping its binary with a file capability
+(`cap_dac_read_search`); a Python script cannot do the same, because the
+kernel ignores capabilities on interpreted files.
+
+To grant access, scoped to the `wheel` group rather than world-readable:
+
+```bash
+sudo tee /etc/udev/rules.d/99-rapl-readable.rules >/dev/null <<'EOF'
+SUBSYSTEM=="powercap", KERNEL=="intel-rapl:*", \
+  RUN+="/usr/bin/chgrp wheel /sys%p/energy_uj", \
+  RUN+="/usr/bin/chmod g+r /sys%p/energy_uj"
+EOF
+sudo udevadm trigger --subsystem-match=powercap
+```
+
+Check it took, and undo it, with:
+
+```bash
+~/.config/omarchy/plugins/dansmith888.cpu/bin/cpuctl doctor | grep -i power
+sudo rm /etc/udev/rules.d/99-rapl-readable.rules   # then reboot to undo
+```
+
+The reading appears within a poll or two — the first sample after granting
+access has nothing to compare against, so it settles on the second.
+
+**Is it safe?** It relaxes a deliberate mitigation. Power readings are a side
+channel: the PLATYPUS attack (CVE-2020-8694) recovered AES and RSA keys from
+them, which is why the counter is root-only. Granting `wheel` read access is
+usually an easy call on a single-user desktop and a poor one on a shared or
+multi-user machine. Your decision.
+
+### The total
+
+Once readings work, the bar needs something to measure against. Intel's RAPL
+reports its own limit and it is used automatically. **AMD reports none**, so
+enter your CPU's **PPT** — Package Power Tracking, the sustained package power
+the chip may draw — under Power in the panel. A Ryzen 9 3900X is 142 W PPT
+against a 105 W TDP, so use the PPT, not the TDP.
+
+Leave PPT at 0 and the wattage is simply shown on its own, with no bar and no
+total.
 
 ## What runs, and as whom
 

@@ -149,12 +149,12 @@
       {
         "key": "pptWatts",
         "type": "integer",
-        "label": "CPU PPT (watts, 0 = hide power)",
+        "label": "CPU PPT (watts, 0 = no total)",
         "min": 0,
         "max": 1000,
         "step": 1,
         "defaultValue": 0,
-        "description": "Package Power Tracking: the sustained package power your CPU may draw, which is what the power bar is measured against. Not the TDP \u2014 a Ryzen 9 3900X is 105 W TDP but 142 W PPT."
+        "description": "Optional, and only AMD needs it: Intel's RAPL reports its own power limit. Sets what the power bar is measured against. Package Power Tracking, not TDP \u2014 a Ryzen 9 3900X is 142 W PPT against 105 W TDP. Power is shown only when the kernel's energy counter is readable; see the README."
       }
     ]
   }
