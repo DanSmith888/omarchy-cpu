@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import binascii
 import fcntl
 import glob
 import json
@@ -20,7 +21,6 @@ import re
 import sys
 import time
 import stat
-import tempfile
 
 PLUGIN_ID = "dansmith888.cpu"
 REPO_URL = "https://github.com/DanSmith888/omarchy-cpu.git"
@@ -34,46 +34,63 @@ _RUNTIME_DIR = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
 # checks it got a regular file, so a symlink planted at one of these paths is
 # refused rather than followed and truncated.
 _STATE_DIR = os.path.join(_RUNTIME_DIR, PLUGIN_ID)
-LOCK_PATH = os.path.join(_STATE_DIR, "lock")
-STATE_PATH = os.path.join(_STATE_DIR, "state.json")
+# Names, deliberately not paths. Everything below is opened relative to a
+# directory descriptor, so these are never resolved against the filesystem
+# a second time.
+LOCK_NAME = "lock"
+STATE_NAME = "state.json"
+LOCK_PATH = os.path.join(_STATE_DIR, LOCK_NAME)      # messages only
+STATE_PATH = os.path.join(_STATE_DIR, STATE_NAME)    # messages only
 # Ceiling on the state file read: it is ours, but read it as untrusted anyway.
 MAX_STATE_BYTES = 4 * 1024 * 1024
 
 
-def state_dir():
-    """Our private runtime directory, verified before use.
+def open_state_dir():
+    """Open our private runtime directory and return a verified descriptor.
 
-    Creating it is not enough: check with lstat that what is there is a real
-    directory we own, not a symlink pointing somewhere else, and that nobody
-    else can write to it.
+    Verifying a directory by path and then opening files inside it by path is
+    a time-of-check/time-of-use gap: the directory can be swapped between the
+    two, and O_NOFOLLOW only refuses a symlink as the *final* component, so it
+    says nothing about the parents. Open the directory once, verify that
+    descriptor with fstat, and do every later open, rename and unlink relative
+    to it. After this returns, no path in this module is resolved again.
     """
     try:
         os.makedirs(_STATE_DIR, mode=0o700, exist_ok=True)
     except OSError as exc:
         raise SystemExit(f"cpuctl: cannot create {_STATE_DIR}: {exc}")
     try:
-        st = os.lstat(_STATE_DIR)
+        dfd = os.open(_STATE_DIR,
+                      os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except OSError as exc:
-        raise SystemExit(f"cpuctl: cannot stat {_STATE_DIR}: {exc}")
-    if not stat.S_ISDIR(st.st_mode) or stat.S_ISLNK(st.st_mode):
-        raise SystemExit(f"cpuctl: {_STATE_DIR} is not a directory")
-    if st.st_uid != os.getuid():
-        raise SystemExit(f"cpuctl: {_STATE_DIR} is not owned by this user")
-    if st.st_mode & 0o077:
-        os.chmod(_STATE_DIR, 0o700)
-    return _STATE_DIR
+        raise SystemExit(f"cpuctl: cannot open {_STATE_DIR}: {exc}")
+    try:
+        st = os.fstat(dfd)
+        if not stat.S_ISDIR(st.st_mode):
+            raise SystemExit(f"cpuctl: {_STATE_DIR} is not a directory")
+        if st.st_uid != os.getuid():
+            raise SystemExit(f"cpuctl: {_STATE_DIR} is not owned by this user")
+        if st.st_mode & 0o077:
+            # Tighten the object we hold, not whatever the name points at now.
+            os.fchmod(dfd, 0o700)
+    except BaseException:
+        os.close(dfd)
+        raise
+    return dfd
 
 
-def open_nofollow(path, flags, mode=0o600):
-    """Open without following a final symlink, and only if it is a regular file."""
-    fd = os.open(path, flags | os.O_NOFOLLOW | os.O_CLOEXEC, mode)
+def open_at(dfd, name, flags, mode=0o600):
+    """Open a name inside the verified directory, refusing symlinks."""
+    fd = os.open(name, flags | os.O_NOFOLLOW | os.O_CLOEXEC, mode, dir_fd=dfd)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise OSError(f"{path} is not a regular file")
-    except Exception:
+            raise OSError(f"{name} is not a regular file")
+    except BaseException:
         os.close(fd)
         raise
     return fd
+
+
 LOCK_TIMEOUT = 5.0
 # A previous sample older than this is thrown away (suspend, long gap).
 MAX_SAMPLE_AGE = 60.0
@@ -198,11 +215,18 @@ class Sampler:
     """
 
     def __enter__(self):
-        state_dir()
-        # O_RDWR|O_CREAT, never O_TRUNC: the lock file's contents are
-        # irrelevant, and truncating whatever is at the path is the bug.
-        self._lock = os.fdopen(
-            open_nofollow(LOCK_PATH, os.O_RDWR | os.O_CREAT), "r+")
+        # Held open for the whole session: the lock, the read and the atomic
+        # replace all happen against this one descriptor, so the directory
+        # cannot be substituted underneath us partway through.
+        self._dfd = open_state_dir()
+        try:
+            # O_RDWR|O_CREAT, never O_TRUNC: the lock file's contents are
+            # irrelevant, and truncating whatever is at the name is the bug.
+            self._lock = os.fdopen(
+                open_at(self._dfd, LOCK_NAME, os.O_RDWR | os.O_CREAT), "r+")
+        except BaseException:
+            os.close(self._dfd)
+            raise
         deadline = time.monotonic() + LOCK_TIMEOUT
         while True:
             try:
@@ -211,6 +235,7 @@ class Sampler:
             except BlockingIOError:
                 if time.monotonic() > deadline:
                     self._lock.close()
+                    os.close(self._dfd)
                     raise SystemExit(
                         f"cpuctl: busy (waited {LOCK_TIMEOUT:.0f}s for {LOCK_PATH})")
                 time.sleep(0.05)
@@ -220,7 +245,10 @@ class Sampler:
         try:
             fcntl.flock(self._lock, fcntl.LOCK_UN)
         finally:
-            self._lock.close()
+            try:
+                self._lock.close()
+            finally:
+                os.close(self._dfd)
 
     # ---- raw readers -------------------------------------------------
 
@@ -289,11 +317,10 @@ class Sampler:
 
     # ---- state -------------------------------------------------------
 
-    @staticmethod
-    def load_state():
+    def load_state(self):
         raw = None
         try:
-            fd = open_nofollow(STATE_PATH, os.O_RDONLY)
+            fd = open_at(self._dfd, STATE_NAME, os.O_RDONLY)
             try:
                 raw = os.read(fd, MAX_STATE_BYTES).decode("utf-8", "replace")
             finally:
@@ -312,25 +339,28 @@ class Sampler:
             return None
         return d
 
-    @staticmethod
-    def save_state(state):
-        # mkstemp gives an exclusive, randomly named 0600 file in our own
-        # directory; nothing predictable is opened for writing.
+    def save_state(self, state):
+        # A random, exclusive name inside the already-open directory, then an
+        # atomic rename in that same directory. O_EXCL means we never write to
+        # something another process put there first.
         tmp = None
         try:
-            state_dir()
-            fd, tmp = tempfile.mkstemp(prefix="state.", suffix=".tmp",
-                                       dir=_STATE_DIR)
+            tmp = "state.%s.tmp" % binascii.hexlify(os.urandom(8)).decode()
+            fd = os.open(tmp,
+                         os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                         | os.O_NOFOLLOW | os.O_CLOEXEC,
+                         0o600, dir_fd=self._dfd)
             with os.fdopen(fd, "w") as f:
                 json.dump(state, f, separators=(",", ":"))
-            os.replace(tmp, STATE_PATH)
+            os.replace(tmp, STATE_NAME,
+                       src_dir_fd=self._dfd, dst_dir_fd=self._dfd)
             tmp = None
         except OSError:
             pass
         finally:
             if tmp is not None:
                 try:
-                    os.unlink(tmp)
+                    os.unlink(tmp, dir_fd=self._dfd)
                 except OSError:
                     pass
 
@@ -585,11 +615,17 @@ def doctor():
         "grant read access to /sys/class/powercap/intel-rapl:*/energy_uj")
 
     try:
-        d = state_dir()
-        fd, probe = tempfile.mkstemp(prefix="probe.", dir=d)
-        os.close(fd)
-        os.unlink(probe)
-        add(True, "Runtime dir private and writable", d)
+        dfd = open_state_dir()
+        try:
+            probe = "probe.%s" % binascii.hexlify(os.urandom(8)).decode()
+            os.close(os.open(probe,
+                             os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                             | os.O_NOFOLLOW | os.O_CLOEXEC,
+                             0o600, dir_fd=dfd))
+            os.unlink(probe, dir_fd=dfd)
+        finally:
+            os.close(dfd)
+        add(True, "Runtime dir private and writable", _STATE_DIR)
     except OSError as exc:
         add(False, "Runtime dir writable", str(exc), "export XDG_RUNTIME_DIR to a writable directory")
     try:
