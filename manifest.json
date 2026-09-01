@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "dansmith888.cpu",
   "name": "CPU",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "author": "Daniel Smith",
   "license": "MIT",
   "description": "CPU load, per-core activity, temperature and clock in the Omarchy bar",
