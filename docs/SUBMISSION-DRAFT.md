@@ -1,5 +1,5 @@
 <!--
-Marketplace submission for https://plugins.omarchy.org — unsubmitted draft.
+Marketplace submission for https://plugins.omarchy.org — UNSUBMITTED DRAFT.
 Before submitting: push the repo and tag v1.0.0, strip this comment, then:
 
   gh issue create --repo HANCORE-linux/omarchy-plugin-marketplace \
@@ -24,20 +24,25 @@ _No response_
 
 ### Maintainer notes
 
-CPU load, temperature and clock in the bar; a load graph, a bar per hardware
-thread, every temperature sensor the kernel exposes, memory, load average and
-the busiest processes in the panel. Middle-click drops into btop.
+Load, temperature and clock in the bar; in the panel a load graph, a bar per
+hardware thread, every CPU temperature sensor the kernel exposes, memory, load
+average and the busiest processes. Middle-click opens btop.
 
-Everything comes from `/proc` and `/sys` — no daemon, no root, no network, no
-external binaries. Two standard-library Python scripts in `bin/`, one of which
-imports the other in-process so a poll costs a single interpreter start. The
-only thing written outside the plugin folder is a lock and a sample-state file
-in `$XDG_RUNTIME_DIR`, so `omarchy plugin remove` is a clean uninstall.
+Process CPU can be shown as a share of the whole chip (everything at full tilt
+sums to 100%) or per core, the `top` convention where one busy thread reads
+100%. The maximum shown adapts to the machine's thread count.
 
-Package power is read from RAPL when the kernel allows it. On a stock kernel
-`energy_uj` is root-only (the PLATYPUS mitigation, CVE-2020-8694), so the
-power readings are simply absent and the panel says so rather than asking for
-privileges. The plugin never escalates and never asks for sudo.
+Everything comes from `/proc` and `/sys`. Two standard-library Python scripts
+in `bin/`, one importing the other in-process so a poll costs a single
+interpreter start. No daemon, no root, no network, no external binaries. The
+only writes outside the plugin folder are a lock and a sample-state file in
+`$XDG_RUNTIME_DIR`, so removal is clean.
+
+Package power is optional and off by default. It is read from the kernel's
+RAPL energy counter, which most kernels ship root-only as the mitigation for
+CVE-2020-8694; without access the plugin shows no power at all rather than
+estimating, and never asks for elevated privileges. The README documents the
+one udev rule that grants it, what that trades away, and how to undo it.
 
 One of a trio with omarchy-gpu and omarchy-network-speed, which share the same
 panel layout and controls.

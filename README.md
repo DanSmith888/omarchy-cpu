@@ -65,8 +65,11 @@ omarchy-shell shell toggle dansmith888.cpu
 | **Load / Memory** | Total CPU load and used RAM, with the 1/5/15 load average underneath |
 | **Cores** | One bar per hardware thread; hover for the number |
 | **Temperature** | Every label the CPU's hwmon reports (Tctl, Tccd1, …), headline one in bold |
-| **Top processes** | Busiest processes since the last sample, as a share of one core (like `top`) |
+| **Top processes** | Busiest processes since the last sample, as a share of the whole chip or of one core |
 | **In the bar** | Which readings the pill shows, refresh rate, °C/°F, graph history |
+| **Process CPU scale** | Whole CPU · 100% (everything at full tilt sums to 100%) or Per core · 2400% (what `top` and `htop` show). The maximum is your machine's thread count × 100 |
+| **Power** | Package watts when the energy counter is readable — optional, see below |
+| **Layout** | Pin the pill to a fixed width, or leave it to size itself |
 | **Warning & alert** | Two thresholds and a color each, taken from your live Omarchy theme; the pill, hero mark and core bars follow them |
 
 Settings are stored inline on the widget's `~/.config/omarchy/shell.json`
