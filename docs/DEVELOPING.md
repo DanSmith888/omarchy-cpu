@@ -1,4 +1,8 @@
-# Cpu — Omarchy plugin
+<!-- Human development notes. Deliberately not named CLAUDE.md or AGENTS.md:
+     this file ships inside the installed plugin tree, and a coding agent that
+     wandered in should read it as documentation, never as instructions. -->
+
+# Developing this plugin
 
 CPU load, temperature and clock in the Omarchy bar
 
