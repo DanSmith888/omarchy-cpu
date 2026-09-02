@@ -29,19 +29,22 @@ Panel {
   readonly property string themeColorsPath: (Quickshell.env("HOME") || "")
     + "/.local/state/omarchy/current/theme/colors.toml"
 
-  // A stalled command must not wedge polling. Each Process gets a deadline;
-  // if it is still running when the timer fires, it is killed and the next
-  // poll starts clean. bin/cpustatus reads /proc directly and never shells
-  // out, so its own output is bounded by the caps in the backend.
+  // A stalled command must not wedge polling, but only a command that has
+  // actually stalled. Cancelling whatever happens to be running on a fixed
+  // tick killed healthy polls: at a 10s tick with a 1s or 2s poll the two
+  // align exactly, the cancelled read came back empty, and the pill vanished
+  // until the next poll. Tick often, cancel on measured age.
   property int watchdogSeconds: 10
+  property var procStartedAt: ({})
   Timer {
-    id: watchdog
-    interval: root.watchdogSeconds * 1000
+    interval: 1000
     repeat: true
     running: true
     onTriggered: {
-      if (statusProc.running) statusProc.running = false
-      if (themeProc.running) themeProc.running = false
+      var now = Date.now()
+      var limit = root.watchdogSeconds * 1000
+      if (statusProc.running && now - (root.procStartedAt["statusProc"] || now) > limit) statusProc.running = false
+      if (themeProc.running && now - (root.procStartedAt["themeProc"] || now) > limit) themeProc.running = false
     }
   }
 
@@ -214,12 +217,18 @@ Panel {
 
   Process {
     id: statusProc
+    onRunningChanged: if (running) root.procStartedAt["statusProc"] = Date.now()
     command: [root.pluginDir + "bin/cpustatus"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         var out = String(this.text).trim()
-        if (out === "" || out === "{}") { root.devicePresent = false; return }
+        // Empty output means the read failed or was cancelled, not that the
+        // hardware went away: keep the last good readings and mark them
+        // stale rather than blanking the pill out of the bar. Only a real
+        // "{}" from the probe means there is genuinely nothing to show.
+        if (out === "") { root.stale = root.devicePresent; return }
+        if (out === "{}") { root.devicePresent = false; return }
         try {
           var d = JSON.parse(out)
           if (d.present !== true) { root.devicePresent = false; return }
@@ -253,6 +262,7 @@ Panel {
 
   Process {
     id: themeProc
+    onRunningChanged: if (running) root.procStartedAt["themeProc"] = Date.now()
     // No shell, no tilde expansion, no glob: an explicit absolute path built
     // from $HOME, read through head so the size is capped whatever the path
     // turns out to point at.
